@@ -12,3 +12,4 @@ crate-type = ["cdylib", "rlib"]
 core-scene.workspace = true
 core-geometry.workspace = true
 wasm-bindgen = "0.2"
+glam.workspace = true
