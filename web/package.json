@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "wasm": "wasm-pack build ../crates/wasm-bindings --target web --out-dir ../../web/src/wasm --out-name wasm_bindings",
+    "dev": "npm run wasm && vite",
+    "build": "npm run wasm && tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

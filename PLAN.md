@@ -22,6 +22,49 @@
 
 ---
 
+## Where we are
+
+Updated at the end of every PR — see [Keeping this section current](#keeping-this-section-current). Newest entry first.
+
+**Now: M1 — Floorplan & shell.** MVP is M0–M4.
+
+| Milestone | State |
+|---|---|
+| M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
+| M1 — Floorplan & shell | ⬜ next |
+| M2 — Furnishing | ⬜ |
+| M3 — Look | ⬜ |
+| M4 — Capture companion (iOS) | ⬜ |
+| M5 — Persistence & sharing | ⬜ |
+| M6+ — Expansion | ⬜ |
+
+### PR #1 — M0 vertical spike · 2026-07-24
+
+**Accomplished**
+
+- The seam holds end to end: Rust owns the parametric document and emits geometry, JS only uploads and draws. No document or geometry logic crossed into TypeScript.
+- `core-scene` — `Wall`, `Anchor`/`Placement`, `Asset` metadata (extent + front vector), and the `Command`/`apply` funnel. That funnel is the one-way door this plan flagged, and it is in place from the first real commit rather than retrofitted.
+- `core-geometry` — prismatic wall extrusion, floor derived from wall bounds, and placement resolution that seats an asset against the nearest wall and yaws it to face into the room. 12 tests, no browser.
+- `web` — three.js viewport with IBL, shadows, pointer drag, metrics HUD.
+- Gate met: 120 fps vsync-locked on an M3 Max, 21 KB gzipped WASM, **0.3–0.5 µs** per Rust↔JS drag call. The chatty-boundary risk is retired at this traffic shape.
+- Asset licensing hygiene started: CC0 chair with provenance and measured metadata recorded in `web/public/assets/README.md`.
+
+**Remains**
+
+- All of M1: 2D wall drawing with snapping, parametric doors and windows, mitred junctions, room detection from the wall graph.
+- Undo. The command funnel exists; the stack on top of it does not.
+- **Schema round-trip against a real RoomPlan USD export.** Still the highest-leverage unvalidated bet in this plan, and still cheapest to test during M1 on a borrowed LiDAR device — before any Swift is written.
+- Asset origin normalisation. The CC0 chair's origin sits 8 mm off centre in depth, so wall-seated placement leaves a matching gap. Harmless at 5–10 cm tolerance; a real M2 ingest problem.
+- The 3.9 MB GLB is committed directly. Swap for a fetch script before the catalog grows.
+- The fps figure is one machine. No low-end integrated GPU, Windows, or Linux measurement yet, and no mobile browser at all.
+- `Spike` in `crates/wasm-bindings` is throwaway. Delete it when M1 lands a real document binding.
+
+### Keeping this section current
+
+Every PR updates this section before it merges: flip the milestone table if a state changed, then add a dated entry saying what landed and what it leaves behind. Unresolved items carry forward into the next entry rather than being dropped — that carry-forward is the whole point, since it is how deferred work stays visible instead of resurfacing as a surprise. Enforced as a rule in [CLAUDE.md](CLAUDE.md).
+
+---
+
 ## The Blender question: don't fork it
 
 Your hunch is reasonable but wrong for this product. Four independent reasons, any one disqualifying:
