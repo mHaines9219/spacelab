@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/core-scene", "crates/core-geometry", "crates/wasm-bindings"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+core-scene = { path = "crates/core-scene" }
+core-geometry = { path = "crates/core-geometry" }
+glam = "0.30"
