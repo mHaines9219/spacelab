@@ -11,6 +11,7 @@ const M_PER_IN = 0.0254;
 const GRID_M = 6 * M_PER_IN; // 6-inch grid
 const CLOSE_M = 0.3; // snap-to-start radius
 const ORTHO_DEG = 8; // straighten near-horizontal / near-vertical segments
+const ALIGN_M = 0.2; // lock an axis onto an earlier corner it lines up with (~8")
 
 type Pt = { x: number; z: number };
 
@@ -61,6 +62,26 @@ export function DrawEditor({
       if (angle < ORTHO_DEG) z = last.z;
       else if (angle > 90 - ORTHO_DEG) x = last.x;
     }
+    // Alignment lock: pull each axis onto the nearest earlier corner it lines up
+    // with, so the last leg can run parallel to an earlier wall and the loop
+    // closes square. The start corner is checked first, so it wins ties — making
+    // "line up with the origin, then close" the easiest lock to land.
+    const rawX = x;
+    const rawZ = z;
+    let bestX = ALIGN_M;
+    let bestZ = ALIGN_M;
+    for (const p of points) {
+      const dx = Math.abs(rawX - p.x);
+      if (dx < bestX) {
+        bestX = dx;
+        x = p.x;
+      }
+      const dz = Math.abs(rawZ - p.z);
+      if (dz < bestZ) {
+        bestZ = dz;
+        z = p.z;
+      }
+    }
     return { x: snapGrid(x), z: snapGrid(z) };
   };
 
@@ -98,6 +119,18 @@ export function DrawEditor({
   const path = points.map((p) => toPx(p));
   const cursorPx = cursor ? toPx(cursor) : null;
 
+  // Alignment guides: when the cursor's axis is locked onto an earlier corner
+  // (see worldAt), draw a guide line through it. The start corner reads green,
+  // echoing the close-the-room affordance.
+  const svgRect = svgRef.current?.getBoundingClientRect();
+  const svgW = svgRect?.width ?? 0;
+  const svgH = svgRect?.height ?? 0;
+  const guideX =
+    cursor && points.length ? points.find((p) => p !== last && p.x === cursor.x) : undefined;
+  const guideZ =
+    cursor && points.length ? points.find((p) => p !== last && p.z === cursor.z) : undefined;
+  const guideColor = (p: Pt) => (p === points[0] ? "#8fd28f" : "#3f6ea5");
+
   return (
     <div className="overlay draw">
       <svg
@@ -122,6 +155,32 @@ export function DrawEditor({
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#grid)" />
+
+        {/* alignment guides — cursor axis locked onto an earlier corner */}
+        {cursorPx && guideX && (
+          <line
+            x1={cursorPx.x}
+            y1={0}
+            x2={cursorPx.x}
+            y2={svgH}
+            stroke={guideColor(guideX)}
+            strokeWidth="1"
+            strokeDasharray="2 5"
+            opacity="0.7"
+          />
+        )}
+        {cursorPx && guideZ && (
+          <line
+            x1={0}
+            y1={cursorPx.y}
+            x2={svgW}
+            y2={cursorPx.y}
+            stroke={guideColor(guideZ)}
+            strokeWidth="1"
+            strokeDasharray="2 5"
+            opacity="0.7"
+          />
+        )}
 
         {/* committed edges */}
         {path.length > 1 && (
