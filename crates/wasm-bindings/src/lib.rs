@@ -5,9 +5,10 @@
 //! Room construction lives here, not in JS, per the "no document/geometry logic in
 //! JavaScript" rule.
 
-use core_geometry::{MeshBuffers, floor_mesh, resolve_placement, wall_mesh};
+use core_geometry::{MeshBuffers, floor_mesh, resolve_placement, seat_opening, wall_mesh};
 use core_scene::{
-    Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, Placement, Scene, Wall,
+    Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, Opening, OpeningId,
+    OpeningKind, Placement, Scene, Wall,
 };
 use glam::{Vec2, Vec3};
 use wasm_bindgen::prelude::*;
@@ -24,6 +25,11 @@ const MIN_DIMENSION_M: f32 = 0.05;
 const WALL_HEIGHT: f32 = 2.5;
 const WALL_THICKNESS: f32 = 0.12;
 
+/// Catalog-ish default sizes (metres) for a freshly placed opening, keyed by kind:
+/// a ~36×80" door on the floor, a ~39×47" window at a 3' sill.
+const DOOR_SIZE: (f32, f32, f32) = (0.9, 2.03, 0.0); // width, height, sill
+const WINDOW_SIZE: (f32, f32, f32) = (1.0, 1.2, 0.9);
+
 /// Cap on retained undo snapshots. The scene is tiny, so this is generous.
 const HISTORY_CAP: usize = 200;
 
@@ -36,9 +42,13 @@ pub struct Document {
     history: Vec<Scene>,
     /// Next furnishing id to hand out. Monotonic; ids are never reused.
     next_id: FurnishingId,
+    /// Next opening id to hand out. Monotonic; a separate namespace from furnishings.
+    next_opening_id: OpeningId,
     /// The furnishing the furniture ops (drag/rotate/scale) act on. UI state, not
     /// document state, so it stays off the undo snapshots (which clone the Scene).
     selected: Option<FurnishingId>,
+    /// The opening the door/window ops act on. UI state, same as `selected`.
+    selected_opening: Option<OpeningId>,
 }
 
 #[wasm_bindgen]
@@ -53,7 +63,9 @@ impl Document {
             walls: MeshBuffers::default(),
             history: Vec::new(),
             next_id: 1,
+            next_opening_id: 1,
             selected: None,
+            selected_opening: None,
         };
         document.rebuild();
         document
@@ -156,7 +168,8 @@ impl Document {
         floor_mesh(&self.scene, &mut self.floor);
         self.walls = MeshBuffers::default();
         for wall in &self.scene.walls {
-            wall_mesh(wall, &mut self.walls);
+            let openings: Vec<Opening> = self.scene.openings_on(wall.id).copied().collect();
+            wall_mesh(wall, &openings, &mut self.walls);
         }
     }
 
@@ -290,6 +303,7 @@ impl Document {
     pub fn select(&mut self, id: u32) {
         if self.scene.furnishing(id).is_some() {
             self.selected = Some(id);
+            self.selected_opening = None;
         }
     }
 
@@ -314,6 +328,166 @@ impl Document {
             Some(f) => transform_of(f),
             None => Vec::new(),
         }
+    }
+
+    // --- Openings (doors & windows) ---------------------------------------
+    // Openings are cut into the wall mesh itself, so every op that changes one rebuilds
+    // wall geometry; the web re-uploads it. Positioning stays in Rust (`seat_opening`).
+
+    /// Add a door (`kind == 0`) or window (`kind == 1`) to `wall_id`, snapped so its
+    /// centre sits at the projection of the world point `(x, z)` onto that wall and the
+    /// whole opening stays within the wall. Selects it. Returns the new id, or -1 if the
+    /// wall doesn't exist.
+    pub fn add_opening(&mut self, kind: u8, wall_id: u32, x: f32, z: f32) -> i32 {
+        let Some(wall) = self.scene.wall(wall_id).copied() else {
+            return -1;
+        };
+        let (opening_kind, (width, height, sill)) = match kind {
+            0 => (OpeningKind::Door, DOOR_SIZE),
+            _ => (OpeningKind::Window, WINDOW_SIZE),
+        };
+        self.checkpoint();
+        let id = self.next_opening_id;
+        self.next_opening_id += 1;
+        let along = seat_opening(&wall, Vec2::new(x, z), width);
+        self.scene.apply(Command::AddOpening(Opening {
+            id,
+            wall: wall_id,
+            kind: opening_kind,
+            along,
+            width,
+            height: height.min(wall.height),
+            sill,
+        }));
+        self.selected_opening = Some(id);
+        self.rebuild();
+        id as i32
+    }
+
+    /// All opening ids, in insertion order — the web iterates these to sync proxies.
+    pub fn opening_ids(&self) -> Vec<u32> {
+        self.scene.openings.iter().map(|o| o.id).collect()
+    }
+
+    /// Everything the renderer needs to place one opening's glass/selection proxy, in a
+    /// coarse array: `[cx, cy, cz, yaw, width, height, thickness, kind]`. `kind` is 0 for
+    /// a door, 1 for a window. Empty if the opening (or its wall) is gone.
+    pub fn opening_transform(&self, id: u32) -> Vec<f32> {
+        let Some(o) = self.scene.opening(id) else {
+            return Vec::new();
+        };
+        let Some(wall) = self.scene.wall(o.wall) else {
+            return Vec::new();
+        };
+        let centre = wall.point_at(o.along);
+        let n = wall.normal();
+        vec![
+            centre.x,
+            o.sill + o.height * 0.5,
+            centre.y,
+            n.x.atan2(n.y),
+            o.width,
+            o.height,
+            wall.thickness,
+            matches!(o.kind, OpeningKind::Window) as u8 as f32,
+        ]
+    }
+
+    /// Select an opening by id (no-op if it doesn't exist). Clears any furnishing
+    /// selection so the two never fight over the keyboard.
+    pub fn select_opening(&mut self, id: u32) {
+        if self.scene.opening(id).is_some() {
+            self.selected_opening = Some(id);
+            self.selected = None;
+        }
+    }
+
+    pub fn deselect_opening(&mut self) {
+        self.selected_opening = None;
+    }
+
+    /// The selected opening id, or -1 if none is selected.
+    pub fn selected_opening_id(&self) -> i32 {
+        self.selected_opening.map_or(-1, |id| id as i32)
+    }
+
+    /// Remove the selected opening (if any). Returns true if one was removed.
+    pub fn remove_selected_opening(&mut self) -> bool {
+        match self.live_opening() {
+            Some(id) => {
+                self.checkpoint();
+                self.scene.apply(Command::RemoveOpening(id));
+                self.selected_opening = None;
+                self.rebuild();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Slide the selected opening along its wall so its centre tracks the world point
+    /// `(x, z)`, re-clamped to stay inside the wall. Rebuilds wall geometry. Returns true
+    /// if it moved. The web checkpoints once at the drag's start, as with furniture.
+    pub fn drag_opening(&mut self, x: f32, z: f32) -> bool {
+        let Some(id) = self.live_opening() else {
+            return false;
+        };
+        let o = *self.scene.opening(id).expect("live opening exists");
+        let Some(wall) = self.scene.wall(o.wall).copied() else {
+            return false;
+        };
+        let along = seat_opening(&wall, Vec2::new(x, z), o.width);
+        self.scene.apply(Command::MoveOpening { id, along });
+        self.rebuild();
+        true
+    }
+
+    /// Set one real-world dimension of the selected opening in inches: axis 0 = width,
+    /// 1 = height, 2 = sill. Re-clamps position (a wider opening may need re-centring) and
+    /// caps against the wall height. Rebuilds geometry. Returns true if applied.
+    pub fn set_opening_dimension(&mut self, axis: u8, inches: f32) -> bool {
+        let Some(id) = self.live_opening() else {
+            return false;
+        };
+        let o = *self.scene.opening(id).expect("live opening exists");
+        let Some(wall) = self.scene.wall(o.wall).copied() else {
+            return false;
+        };
+        self.checkpoint();
+        let metres = (inches / M_TO_IN).max(MIN_DIMENSION_M);
+        let (mut width, mut height, mut sill) = (o.width, o.height, o.sill);
+        match axis {
+            0 => width = metres,
+            1 => height = metres.min(wall.height),
+            _ => sill = metres.min(wall.height - MIN_DIMENSION_M),
+        }
+        // Keep the opening inside the wall vertically as well as along its length.
+        height = height.min(wall.height - sill);
+        let along = seat_opening(&wall, wall.point_at(o.along), width);
+        self.scene.apply(Command::ResizeOpening {
+            id,
+            width,
+            height,
+            sill,
+        });
+        self.scene.apply(Command::MoveOpening { id, along });
+        self.rebuild();
+        true
+    }
+
+    /// Selected opening's size in inches as `[width, height, sill]`, or empty if none.
+    pub fn opening_dimensions(&self) -> Vec<f32> {
+        match self.live_opening().and_then(|id| self.scene.opening(id)) {
+            Some(o) => vec![o.width * M_TO_IN, o.height * M_TO_IN, o.sill * M_TO_IN],
+            None => Vec::new(),
+        }
+    }
+
+    /// The selected opening, but only if it still exists — an undo can drop it while
+    /// `selected_opening` still points at it, and the ops must not touch a ghost.
+    fn live_opening(&self) -> Option<OpeningId> {
+        self.selected_opening
+            .filter(|id| self.scene.opening(*id).is_some())
     }
 
     // --- Selected-furnishing manipulation ---------------------------------
@@ -563,5 +737,90 @@ mod tests {
         assert!(doc.remove_selected());
         assert_eq!(doc.furnishing_ids(), vec![a]);
         assert_eq!(doc.selected_id(), -1);
+    }
+
+    #[test]
+    fn add_opening_snaps_onto_the_wall_and_cuts_it() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let solid_verts = doc.wall_positions().len();
+
+        // Wall 0 runs along +X from the origin; a door dropped near its far end snaps in.
+        let id = doc.add_opening(0, 0, 3.6, 0.0);
+        assert_eq!(id, 1);
+        assert_eq!(doc.selected_opening_id(), 1);
+        assert_eq!(doc.opening_ids(), vec![1]);
+        // Cutting the wall changes its geometry (more strips + reveals than a solid wall).
+        assert_ne!(doc.wall_positions().len(), solid_verts);
+
+        // The transform centre sits on the wall centreline, clamped to fit (0.9 wide, so
+        // its centre can reach at most 4.0 - 0.45 = 3.55).
+        let t = doc.opening_transform(1);
+        assert!((t[0] - 3.55).abs() < 1e-4, "centre x {}", t[0]);
+        assert_eq!(t[2], 0.0); // on the z=0 wall
+        assert_eq!(t[7], 0.0); // door flag
+    }
+
+    #[test]
+    fn add_opening_to_a_missing_wall_is_rejected() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        assert_eq!(doc.add_opening(0, 99, 1.0, 0.0), -1);
+        assert!(doc.opening_ids().is_empty());
+    }
+
+    #[test]
+    fn window_carries_a_sill_and_reports_its_dimensions() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = doc.add_opening(1, 0, 2.0, 0.0) as u32;
+        assert_eq!(doc.opening_transform(id)[7], 1.0); // window flag
+        let dims = doc.opening_dimensions(); // inches: width, height, sill
+        assert!((dims[2] / 39.37 - 0.9).abs() < 1e-3, "sill {}", dims[2]);
+
+        // Narrowing it below the wall keeps it seated; widening past the wall re-centres.
+        assert!(doc.set_opening_dimension(0, 12.0)); // 12" wide
+        assert!((doc.opening_dimensions()[0] - 12.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn dragging_a_window_slides_it_along_the_wall() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = doc.add_opening(1, 0, 1.0, 0.0) as u32;
+        let x0 = doc.opening_transform(id)[0];
+        doc.checkpoint();
+        assert!(doc.drag_opening(3.0, 0.0));
+        let x1 = doc.opening_transform(id)[0];
+        assert!(x1 > x0, "window should slide towards +X: {x0} -> {x1}");
+        // One undo returns it to where the drag began.
+        assert!(doc.undo());
+        assert!((doc.opening_transform(id)[0] - x0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn deleting_a_wall_removes_its_openings_and_undo_restores_both() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_opening(0, 0, 2.0, 0.0);
+        assert_eq!(doc.opening_ids().len(), 1);
+        doc.delete_wall(0);
+        assert!(doc.opening_ids().is_empty(), "opening should die with its wall");
+        assert!(doc.undo());
+        assert_eq!(doc.wall_count(), 4);
+        assert_eq!(doc.opening_ids().len(), 1, "undo restores the wall's opening");
+    }
+
+    #[test]
+    fn opening_ops_after_undoing_it_away_are_safe_no_ops() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = doc.add_opening(0, 0, 2.0, 0.0) as u32;
+        assert!(doc.undo()); // opening gone; selected_opening still points at it
+        assert_eq!(doc.selected_opening_id(), id as i32);
+        assert!(!doc.drag_opening(1.0, 0.0));
+        assert!(!doc.remove_selected_opening());
+        assert!(!doc.set_opening_dimension(0, 40.0));
+        assert!(doc.opening_dimensions().is_empty());
     }
 }
