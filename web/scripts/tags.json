@@ -1,0 +1,279 @@
+{
+  "_format": "Input to `npm run ingest:build`. One entry per curated master in web/assets-src/. Records BOTH provenance (source/license/attribution) and the manual geometry tags the constraint solver needs (real-world size, front orientation, anchor). Drop a new .glb in assets-src/, add an entry here, rebuild.",
+  "_fields": {
+    "id": "stable catalog id (also the normalised filename in models/)",
+    "file": "master filename in assets-src/",
+    "title": "human name",
+    "source": "where it came from, e.g. 'Quaternius (CC0)'",
+    "source_url": "canonical origin URL",
+    "license": "SPDX-ish string, e.g. 'CC0-1.0'",
+    "attribution": "credit string, or null when the licence needs none (CC0)",
+    "sizeMeters": "real-world length along sizeAxis. OMIT for already-real-scaled sources (keeps native size)",
+    "sizeAxis": "x | y | z that sizeMeters measures (default y = height)",
+    "yawDeg": "degrees about +Y so the model's front faces +Z (default 0)",
+    "anchor": "floor | wall (default floor)",
+    "category": "catalog category",
+    "tags": "free-text search tags",
+    "clearance_m": "optional { front, sides, back } clearance envelope in metres"
+  },
+  "assets": [
+    {
+      "id": "couch-medium",
+      "file": "couch-medium.glb",
+      "title": "Couch, Medium (2-seat)",
+      "source": "Quaternius (CC0)",
+      "source_url": "https://poly.pizza/m/mWgQ94zhDZ",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 0.8,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "tags": [
+        "sofa",
+        "couch",
+        "2-seat",
+        "living-room"
+      ],
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "table-round-large",
+      "file": "table-round-large.glb",
+      "title": "Round Table, Large",
+      "source": "CreativeTrio (CC0)",
+      "source_url": "https://poly.pizza/m/aG6qYcqcI0",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 1.2,
+      "sizeAxis": "x",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "tags": [
+        "table",
+        "round",
+        "pedestal",
+        "dining"
+      ],
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0.6,
+        "back": 0.6
+      }
+    },
+    {
+      "id": "nightstand",
+      "file": "nightstand.glb",
+      "title": "Night Stand",
+      "source": "Quaternius (CC0)",
+      "source_url": "https://poly.pizza/m/9LI73c5uFA",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 0.55,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "tags": [
+        "nightstand",
+        "bedside",
+        "drawer",
+        "bedroom"
+      ],
+      "clearance_m": {
+        "front": 0.4,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "floor-lamp",
+      "file": "floor-lamp.glb",
+      "title": "Floor Lamp",
+      "source": "Quaternius (CC0)",
+      "source_url": "https://poly.pizza/m/eBQtooeh43",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 1.5,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "lighting",
+      "tags": [
+        "floor-lamp",
+        "lamp",
+        "lighting"
+      ],
+      "clearance_m": {
+        "front": 0,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "cabinet",
+      "file": "cabinet.glb",
+      "title": "Cabinet",
+      "source": "CreativeTrio (CC0)",
+      "source_url": "https://poly.pizza/m/wOiMrnUuhe",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 0.9,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "tags": [
+        "cabinet",
+        "sideboard",
+        "storage"
+      ],
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "armchair",
+      "file": "armchair.glb",
+      "title": "Sheen Armchair",
+      "source": "Khronos glTF-Sample-Assets (© Wayfair)",
+      "source_url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SheenChair",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "tags": [
+        "chair",
+        "armchair",
+        "accent",
+        "lounge"
+      ],
+      "clearance_m": {
+        "front": 0.4,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "kenney-bed",
+      "file": "kenney-bed.glb",
+      "title": "Bed (Double)",
+      "source": "Kenney Furniture Kit (CC0)",
+      "source_url": "https://kenney.nl/assets/furniture-kit",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 2,
+      "sizeAxis": "z",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "bed",
+      "tags": [
+        "bed",
+        "double",
+        "bedroom"
+      ],
+      "clearance_m": {
+        "front": 0,
+        "sides": 0.3,
+        "back": 0
+      }
+    },
+    {
+      "id": "kenney-chair",
+      "file": "kenney-chair.glb",
+      "title": "Chair",
+      "source": "Kenney Furniture Kit (CC0)",
+      "source_url": "https://kenney.nl/assets/furniture-kit",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 0.9,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "tags": [
+        "chair",
+        "dining",
+        "desk"
+      ],
+      "clearance_m": {
+        "front": 0.4,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "kenney-bookcase",
+      "file": "kenney-bookcase.glb",
+      "title": "Bookcase",
+      "source": "Kenney Furniture Kit (CC0)",
+      "source_url": "https://kenney.nl/assets/furniture-kit",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 1.8,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "tags": [
+        "bookcase",
+        "shelf",
+        "storage"
+      ],
+      "clearance_m": {
+        "front": 0.4,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "kenney-rug",
+      "file": "kenney-rug.glb",
+      "title": "Rug",
+      "source": "Kenney Furniture Kit (CC0)",
+      "source_url": "https://kenney.nl/assets/furniture-kit",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 1.6,
+      "sizeAxis": "x",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "decor",
+      "tags": [
+        "rug",
+        "floor",
+        "decor"
+      ],
+      "clearance_m": null
+    },
+    {
+      "id": "kenney-plant",
+      "file": "kenney-plant.glb",
+      "title": "Potted Plant",
+      "source": "Kenney Furniture Kit (CC0)",
+      "source_url": "https://kenney.nl/assets/furniture-kit",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeMeters": 0.5,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "decor",
+      "tags": [
+        "plant",
+        "greenery",
+        "decor"
+      ],
+      "clearance_m": null
+    }
+  ]
+}

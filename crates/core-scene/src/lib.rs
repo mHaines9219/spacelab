@@ -108,6 +108,7 @@ pub enum Command {
     /// Remove every wall — used when regenerating a room from scratch.
     ClearWalls,
     AddFurnishing(Furnishing),
+    RemoveFurnishing(FurnishingId),
     Reposition {
         id: FurnishingId,
         placement: Placement,
@@ -139,6 +140,7 @@ impl Scene {
             Command::DeleteWall(id) => self.walls.retain(|w| w.id != id),
             Command::ClearWalls => self.walls.clear(),
             Command::AddFurnishing(furnishing) => self.furnishings.push(furnishing),
+            Command::RemoveFurnishing(id) => self.furnishings.retain(|f| f.id != id),
             Command::Reposition { id, placement } => {
                 if let Some(furnishing) = self.furnishings.iter_mut().find(|f| f.id == id) {
                     furnishing.placement = placement;
@@ -219,6 +221,28 @@ mod tests {
         assert_eq!(scene.floor_material, FloorMaterial::WoodLight);
         scene.apply(Command::SetFloorMaterial(FloorMaterial::Concrete));
         assert_eq!(scene.floor_material, FloorMaterial::Concrete);
+    }
+
+    #[test]
+    fn add_and_remove_furnishings() {
+        let mut scene = one_chair();
+        scene.apply(Command::AddFurnishing(Furnishing {
+            id: 2,
+            asset: Asset {
+                extent: Vec3::new(1.0, 0.5, 1.0),
+            },
+            placement: Placement {
+                position: Vec3::ZERO,
+                yaw: 0.0,
+                anchor: Anchor::Floor,
+            },
+            scale: Vec3::ONE,
+        }));
+        assert_eq!(scene.furnishings.len(), 2);
+        scene.apply(Command::RemoveFurnishing(1));
+        assert_eq!(scene.furnishings.len(), 1);
+        assert!(scene.furnishing(1).is_none());
+        assert!(scene.furnishing(2).is_some());
     }
 
     #[test]
