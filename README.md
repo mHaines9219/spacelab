@@ -56,21 +56,38 @@ ios/                    capture companion (RoomPlan / AR corner-tap) — M4
 1. **No document or geometry logic in JavaScript.** Rust owns the scene and emits buffers; the web layer draws them. The renderer is replaceable, the core is not.
 2. **Every capture path emits the same parametric wall/opening schema** — RoomPlan scan, AR corner-tap, and manual floorplan trace alike.
 
-## Develop
+## Spin up the app
 
-Needs `wasm-pack` and the `wasm32-unknown-unknown` target:
+**Prerequisites** — `wasm-pack` and the `wasm32-unknown-unknown` target (plus Node and a
+Rust toolchain):
 
 ```sh
 rustup target add wasm32-unknown-unknown
 brew install wasm-pack
-
-cargo test              # geometry + scene, no browser needed
-cd web && npm install && npm run textures && npm run dev
 ```
 
-`npm run dev` and `npm run build` rebuild the WASM first; `npm run wasm` does it alone.
-Generated output lands in `web/src/wasm/` and is not committed.
+**First run, from a fresh clone:**
 
-`npm run textures` fetches the CC0 floor/wall textures from ambientCG into
-`web/public/assets/textures/` (gitignored, ~9 MB). Run it once after cloning; the app
-still loads without it, just with untextured surfaces.
+```sh
+cargo test                    # 1. geometry + scene, no browser needed
+
+cd web
+npm install                   # 2. web deps (audit warnings here are expected — don't `audit fix --force`)
+npm run ingest:build          # 3. build the furniture GLBs from the masters in assets-src/
+npm run textures              # 4. fetch the CC0 floor/wall textures
+npm run dev                   # 5. rebuild WASM + start Vite at http://localhost:5173
+```
+
+Steps 3 and 4 are the two that regenerate gitignored content — **skip either and the app
+loads, but empty**: no furniture (step 3) or untextured surfaces (step 4). Run them once
+after cloning; on later runs `npm run dev` alone is enough.
+
+**What each step regenerates (none of it is committed):**
+
+- `npm run ingest:build` — normalises the masters in `web/assets-src/` into
+  `web/public/assets/models/*.glb` (the furniture the catalog places). `catalog.json`, the
+  committed metadata index, points at these; without them the catalog is empty.
+- `npm run textures` — fetches the CC0 floor/wall PBR sets from ambientCG into
+  `web/public/assets/textures/` (~9 MB).
+- `npm run dev` / `npm run build` rebuild the WASM first (`npm run wasm` does it alone);
+  output lands in `web/src/wasm/`.
