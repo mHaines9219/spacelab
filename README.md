@@ -6,13 +6,17 @@ Name is a placeholder.
 
 ## Status
 
-**M0 vertical spike complete.** Two Rust-defined walls extrude and render, a CC0 chair
-drags across the floor, and placement snaps to the nearest wall with the asset yawed to
-face into the room. See [PLAN.md](PLAN.md) for the architecture, the reasoning behind it,
-and the milestone breakdown.
+**M1 — Floorplan & shell, in progress.** You start by creating a floor plan — a
+rectangle or square by dimension, or drawn freehand top-down with typed feet-and-inches
+segments — and it extrudes into a textured room you can resize and furnish. See
+[PLAN.md](PLAN.md) for the architecture, the reasoning behind it, and the milestone
+breakdown.
 
-The spike is deliberately throwaway — it exists to measure the Rust/JS seam before M1
-commits to it. `Spike` in `crates/wasm-bindings` is the only part meant to be deleted.
+The M0 spike's throwaway `Spike` binding has been retired into the real `Document`
+binding: mutations flow through Rust commands, and any wall edit re-emits geometry that
+the web layer re-uploads. You can add and delete individual walls by clicking them in
+3D, and **Cmd/Ctrl+Z undoes any action**. Still open in M1: doors/windows, mitred
+junctions, and room detection from the wall graph (multi-room / branching layouts).
 
 ### M0 gate results
 
@@ -61,8 +65,12 @@ rustup target add wasm32-unknown-unknown
 brew install wasm-pack
 
 cargo test              # geometry + scene, no browser needed
-cd web && npm install && npm run dev
+cd web && npm install && npm run textures && npm run dev
 ```
 
 `npm run dev` and `npm run build` rebuild the WASM first; `npm run wasm` does it alone.
 Generated output lands in `web/src/wasm/` and is not committed.
+
+`npm run textures` fetches the CC0 floor/wall textures from ambientCG into
+`web/public/assets/textures/` (gitignored, ~9 MB). Run it once after cloning; the app
+still loads without it, just with untextured surfaces.

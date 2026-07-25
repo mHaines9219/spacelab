@@ -3,6 +3,7 @@ node_modules/
 dist/
 pkg/
 web/src/wasm/
+web/public/assets/textures/
 *.wasm
 .DS_Store
 .env

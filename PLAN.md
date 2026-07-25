@@ -31,12 +31,93 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 | Milestone | State |
 |---|---|
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
-| M1 — Floorplan & shell | ⬜ next |
+| M1 — Floorplan & shell | 🚧 in progress |
 | M2 — Furnishing | ⬜ |
 | M3 — Look | ⬜ |
 | M4 — Capture companion (iOS) | ⬜ |
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
+
+### Undo (Cmd/Ctrl+Z) · 2026-07-24
+
+**Accomplished**
+
+- **Undo across every action** — furniture rotate/scale/drag/dimension/reset, floor finish, wall add/delete, and room create/resize. The command funnel finally has a stack on top of it: the `Document` binding snapshots the scene before each action (`checkpoint`) and `undo` restores it. Cloning the whole scene is trivial at this size and far simpler than an inverse per command — the plan's "simple command-stack undo".
+- **One gesture = one undo step.** Discrete actions checkpoint themselves; a drag checkpoints once (on the first pointer move, not per move), so undoing a drag returns to where it started in a single step. Undoing room creation returns to the start screen.
+- The web sends only the Cmd/Ctrl+Z intent (ignored while a text field is focused, so native text-undo still works) and re-syncs the whole scene from the restored document.
+- Verified: 3 new binding unit tests (undo reverts action-by-action; restores a deleted wall; coalesces a drag into one step) — **21 Rust tests**; Playwright drives Cmd+Z across rotate, resize, wall delete, wall add, floor finish, and creation-to-start-screen (14 checks). Clippy clean.
+
+**Remains**
+
+- **No redo yet.** History is one-directional; redo is a second stack away.
+- Rotate/scale undo is per key-press, so holding an arrow makes many small steps.
+- Snapshot-based (clones the scene per action) — right at this scale, but a large document would want the inverse-command model.
+- Undo doesn't reach into the 2D draw editor's in-progress corners (those aren't document state until the room is created).
+- (carried) RoomPlan USD round-trip; chair origin 8 mm; the 3.9 MB GLB; fps on one machine; dev-only probes (`__chairYaw`, `__wallCount`, `__floorTris`, `__deleteWallById`) present.
+
+### M1: floorplan creation, polygon floor & the document binding · 2026-07-24
+
+**Accomplished**
+
+- **Floorplan creation flow** — a start screen with three routes: **Rectangle** and **Square** take feet + inches; **Draw** is a top-down SVG editor (click corners, direct-distance entry by typing feet + inches for the next segment, 6-inch grid + ortho snapping, snap-to-close to finish the loop).
+- **Real polygon floor** — ear-clipping triangulation of the wall loop replaces the bounding-box floor, so concave (L-shaped) rooms fill correctly. Emits UVs and guaranteed-upward normals.
+- **The geometry-rebuild seam** — any wall edit re-emits floor + wall buffers and the 3D view re-uploads them live; the camera reframes to the footprint. This is the real M1 binding, so the throwaway **`Spike` is retired into `Document`**. Room construction (rectangle, polygon) lives in Rust; JS only sends intent. New `core-scene` commands `DeleteWall`/`ClearWalls`; `set_rectangle`/`set_polygon`/`delete_wall`/`wall_segments`/`room_bounds` on the binding.
+- **Resize the space** — rectangle/square rooms show editable Width × Depth (feet + inches) that regenerate the room live.
+- **Add / delete walls in 3D** — click a wall to select it (translucent highlight), press Delete or the panel button to remove it; "add wall" mode drops a segment from two floor clicks. The **floor is a document-owned footprint** (`Scene::floor_outline`) set at room creation, *independent of the walls* — so deleting one, two, or all walls never reshapes it. (Earlier iterations derived the floor from the wall loop and collapsed it to a triangle once two adjacent walls were gone; regression-tested now for 0–4 deletions.)
+- Furniture (select/rotate/scale/reset) and floor finishes verified still working end-to-end inside generated rooms.
+- Verified: 17 Rust tests (new rectangular + concave-floor triangulation tests), clippy clean; Playwright drove all three creation modes, resize, a furniture regression, and wall select/delete/add (27 checks across three runs); screenshots reviewed.
+
+**Remains**
+
+- **Resize is rectangle-only.** A drawn room can't be resized by W × D without destroying its shape — it needs the 2D plan editor or a uniform scale.
+- The floor footprint is only set at room creation/resize; there's no edit-the-floor-shape affordance, and added walls don't extend it. Proper wall-graph face detection / multi-room support is still an M1 item.
+- Added walls default to the same thickness/height as generated ones; per-wall height/thickness editing isn't exposed.
+- The draw tool doesn't reject self-intersecting polygons; ear-clipping degrades gracefully but the result is undefined for those.
+- Still open within M1: **parametric doors/windows, mitred wall junctions, room detection from the wall graph.**
+- Undo still absent across all these commands. (carried)
+- dev-only `__chairYaw` probe still present. (carried)
+- Carried from PR #1: RoomPlan USD round-trip; chair origin 8 mm; the 3.9 MB GLB committed directly; fps measured on one machine only.
+
+### Floor finishes & drywall walls · 2026-07-24
+
+**Accomplished**
+
+- **Floor finishes** — four CC0 textured floors (light wood, dark wood, stone tile, polished concrete) chosen from a picker. The *choice* is document state: new `FloorMaterial` enum + `SetFloorMaterial` command in `core-scene`. **Rule #1 held** — Rust owns which finish is selected; JS maps the ordinal to the texture files. This is the first material work, so it foreshadows M3's document-level material swapping.
+- **Walls** — fixed matte drywall (ambientCG `PaintedPlaster017`) with a light normal map, so they read as dry wall rather than flat paint. No wall options, by request.
+- Geometry now emits **per-vertex UVs** (metric, projected per quad) on `MeshBuffers`; floor and walls are split into separate meshes so each carries its own material.
+- Textures are CC0 1K PBR sets fetched from ambientCG by `scripts/fetch-textures.sh` (`npm run textures`), gitignored (~9 MB), provenance in the assets README — matches the plan's "fetch script, not committed binaries" guidance.
+- Rotation direction flipped per feedback: `←` clockwise, `→` counter-clockwise. Added the missing `vite-env.d.ts`.
+- Verified: 16 Rust tests green (new `FloorMaterial` test); a 13-check Playwright run drives the floor picker, selection, both rotation directions, scale, typed dimension, reset and deselect — all pass, no console errors; screenshots of all four finishes reviewed.
+
+**Scope note.** Floor/wall texturing is early **M3 (Look)** landing during M1 — flagged, not absorbed, same as rotate/scale was early M2.
+
+**Remains**
+
+- Wall material is fixed — no per-wall/per-room choice and no paint-colour option (deliberately, per "don't overthink"). A real M3 look pass wants material swapping as document state, the way the floor now is.
+- Floor UVs project in world metres at a fixed per-finish tile size; the tiling grid isn't aligned to any wall origin. Fine at this fidelity.
+- Textures are 1K and load at runtime — all four floor sets eagerly, no KTX2/compression or lazy-loading. The plan's content pipeline (KTX2, meshopt) is still unbuilt. Fetch also depends on ambientCG being reachable; Poly Haven's CDN was down from here, so every set comes from one host.
+- The dev-only `__chairYaw` probe (from PR #2) is still present. (carried)
+
+### Select, rotate & scale a furnishing · 2026-07-24
+
+**Accomplished**
+
+- Direct manipulation of the chair: click to select (edge-box outline), click empty space or `Esc` to deselect.
+- **Rotate** — `←`/`→` in 15° steps.
+- **Scale** — `↑`/`↓` nudge ±5% uniformly; a selection panel shows **W/D/H in inches** and takes an exact value per axis by typing; `R` (or a button) resets to catalog proportions.
+- Two new `core-scene` commands — `SetYaw` and `SetScale` — so every rotate/scale/reset flows through `Scene::apply`. **Rule #1 held**: JS only reads back a coarse `[x, up, z, yaw, sx, sy, sz, snapped]` transform and draws it; no document or geometry logic crossed the boundary. A resize re-seats the asset against its wall with the new footprint and preserves the user's yaw (scaling never re-orients).
+- Verified: 3 new `core-scene` unit tests (15 Rust tests total, green); a 10-check Playwright run drives the real app end to end — select, rotate and reverse, ↑ enlarge, type an exact width, reset, deselect — all pass, no console errors. WASM 23 KB gzipped (was 21).
+
+**Scope note.** Rotate/scale is **M2 (Furnishing)** work landing during M1 — surfaced here per scope discipline rather than absorbed quietly. It is a thin slice: one hard-coded chair, no catalog, no clearance checking.
+
+**Remains**
+
+- **Scale cuts against the real-dimension thesis.** Expressing size in inches keeps "does it fit?" answerable, but there is still no clearance / collision checking (`parry3d`) — that check is the actual M2 value and isn't here yet. Per-axis scale can also distort the GLB, which a real normalized catalog pipeline would disallow.
+- Rotating a wall-anchored asset changes yaw only; it does not re-form the anchor, so a rotated chair floats off the wall until the next drag re-snaps it.
+- Still a single hard-coded chair. No multi-object scene, no per-object identity beyond the `CHAIR` id; the selection UI, keyboard handling, and `Spike` bindings around the new commands are throwaway M0 glue.
+- A dev-only `__chairYaw` probe (gated by `import.meta.env.DEV`, stripped from production) exists so the e2e test can read rotation.
+- **Undo** still absent — `SetYaw`/`SetScale` go through the command funnel, but there is no stack on top of it. (carried)
+- Carried from PR #1, still open: RoomPlan USD schema round-trip; CC0 chair origin 8 mm off-centre; the 3.9 MB GLB committed directly; fps measured on one machine only (no low-end/Windows/Linux/mobile); delete `Spike` when M1 lands a real document binding.
 
 ### PR #1 — M0 vertical spike · 2026-07-24
 

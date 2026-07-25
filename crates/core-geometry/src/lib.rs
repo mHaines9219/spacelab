@@ -7,6 +7,9 @@ use glam::{Vec2, Vec3};
 pub struct MeshBuffers {
     pub positions: Vec<f32>,
     pub normals: Vec<f32>,
+    /// One `(u, v)` per vertex, in world **metres** projected onto each quad's plane.
+    /// Texture tiling density is a renderer concern applied via `repeat`.
+    pub uvs: Vec<f32>,
     pub indices: Vec<u32>,
 }
 
@@ -20,12 +23,19 @@ impl MeshBuffers {
     }
 
     /// `a b c d` must wind counter-clockwise seen from outside; the normal follows.
+    /// UVs project onto the quad's plane in metres: `u` along `a→b`, `v` along `a→d`,
+    /// so a tiling texture repeats consistently regardless of quad size.
     fn quad(&mut self, a: Vec3, b: Vec3, c: Vec3, d: Vec3) {
         let base = self.vertex_count() as u32;
         let normal = (b - a).cross(c - a).normalize();
+        let u_axis = (b - a).normalize_or_zero();
+        let v_axis = (d - a).normalize_or_zero();
         for vertex in [a, b, c, d] {
+            let rel = vertex - a;
             self.positions.extend_from_slice(&vertex.to_array());
             self.normals.extend_from_slice(&normal.to_array());
+            self.uvs
+                .extend_from_slice(&[rel.dot(u_axis), rel.dot(v_axis)]);
         }
         self.indices
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -55,23 +65,92 @@ pub fn wall_mesh(wall: &Wall, out: &mut MeshBuffers) {
     out.quad(low[1], high[1], high[2], low[2]);
 }
 
+/// The floor is the document's designated footprint — independent of the walls, so
+/// removing walls never reshapes it.
 pub fn floor_mesh(scene: &Scene, out: &mut MeshBuffers) {
-    let Some(first) = scene.walls.first() else {
+    let outline = &scene.floor_outline;
+    if outline.len() < 3 {
         return;
-    };
-    let (mut min, mut max) = (first.start, first.start);
-    for wall in &scene.walls {
-        for p in [wall.start, wall.end] {
-            min = min.min(p);
-            max = max.max(p);
+    }
+    let base = out.vertex_count() as u32;
+    for p in outline {
+        out.positions.extend_from_slice(&ground(*p, 0.0).to_array());
+        out.normals.extend_from_slice(&Vec3::Y.to_array());
+        // UVs in world metres (x, z); tiling density is applied by the renderer.
+        out.uvs.extend_from_slice(&[p.x, p.y]);
+    }
+    for [a, b, c] in triangulate(outline) {
+        // Reorder so the face winds upward (right-hand normal = +Y), matching the
+        // per-vertex +Y normals regardless of the outline's own orientation.
+        let up = (outline[b].y - outline[a].y) * (outline[c].x - outline[a].x)
+            - (outline[b].x - outline[a].x) * (outline[c].y - outline[a].y);
+        let (j, k) = if up > 0.0 { (b, c) } else { (c, b) };
+        out.indices
+            .extend_from_slice(&[base + a as u32, base + j as u32, base + k as u32]);
+    }
+}
+
+/// Twice the signed area of a polygon; positive when the winding is counter-clockwise.
+fn signed_area2(poly: &[Vec2]) -> f32 {
+    let n = poly.len();
+    (0..n)
+        .map(|i| {
+            let a = poly[i];
+            let b = poly[(i + 1) % n];
+            a.x * b.y - b.x * a.y
+        })
+        .sum()
+}
+
+fn point_in_triangle(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
+    let d1 = (p - a).perp_dot(b - a);
+    let d2 = (p - b).perp_dot(c - b);
+    let d3 = (p - c).perp_dot(a - c);
+    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(has_neg && has_pos)
+}
+
+/// Ear-clipping triangulation of a simple polygon. Returns index triples into `poly`;
+/// the caller fixes winding. Robust to clockwise or counter-clockwise input.
+fn triangulate(poly: &[Vec2]) -> Vec<[usize; 3]> {
+    let n = poly.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    let mut idx: Vec<usize> = (0..n).collect();
+    if signed_area2(poly) < 0.0 {
+        idx.reverse(); // normalise to CCW so the convex test is consistent
+    }
+    let mut tris = Vec::with_capacity(n - 2);
+    let mut guard = 0;
+    while idx.len() > 3 {
+        let m = idx.len();
+        let mut clipped = false;
+        for i in 0..m {
+            let (a, b, c) = (idx[(i + m - 1) % m], idx[i], idx[(i + 1) % m]);
+            let (pa, pb, pc) = (poly[a], poly[b], poly[c]);
+            // Convex corner (left turn), and no other vertex falls inside the ear.
+            if (pb - pa).perp_dot(pc - pb) > 0.0
+                && !idx.iter().any(|&v| {
+                    v != a && v != b && v != c && point_in_triangle(poly[v], pa, pb, pc)
+                })
+            {
+                tris.push([a, b, c]);
+                idx.remove(i);
+                clipped = true;
+                break;
+            }
+        }
+        guard += 1;
+        if !clipped || guard > n * n {
+            break; // degenerate or self-intersecting; stop rather than loop forever
         }
     }
-    out.quad(
-        ground(min, 0.0),
-        ground(Vec2::new(min.x, max.y), 0.0),
-        ground(max, 0.0),
-        ground(Vec2::new(max.x, min.y), 0.0),
-    );
+    if idx.len() == 3 {
+        tris.push([idx[0], idx[1], idx[2]]);
+    }
+    tris
 }
 
 pub fn shell_mesh(scene: &Scene) -> MeshBuffers {
@@ -205,14 +284,107 @@ mod tests {
         assert_eq!(ys.iter().cloned().fold(f32::MIN, f32::max), wall.height);
     }
 
-    #[test]
-    fn floor_covers_the_wall_bounds_facing_up() {
-        let mut mesh = MeshBuffers::default();
-        floor_mesh(&corner_room(), &mut mesh);
-        assert_eq!(mesh.triangle_count(), 2);
-        for (_, normal) in face_normals(&mesh) {
-            assert!((normal - Vec3::Y).length() < 1e-5, "floor normal {normal}");
+    /// A closed rectangular room, corner at the origin, with matching walls and floor.
+    fn rect_room(width: f32, depth: f32) -> Scene {
+        let mut scene = Scene::default();
+        let corners = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(width, 0.0),
+            Vec2::new(width, depth),
+            Vec2::new(0.0, depth),
+        ];
+        for i in 0..4 {
+            scene.apply(Command::AddWall(Wall {
+                id: i as u32,
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+                thickness: 0.12,
+                height: 2.5,
+            }));
         }
+        scene.apply(Command::SetFloorOutline(corners));
+        scene
+    }
+
+    fn mesh_triangles(mesh: &MeshBuffers) -> Vec<[Vec3; 3]> {
+        mesh.indices
+            .chunks(3)
+            .map(|tri| {
+                std::array::from_fn(|i| {
+                    let v = tri[i] as usize * 3;
+                    Vec3::from_slice(&mesh.positions[v..v + 3])
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rectangular_floor_triangulates_facing_up_and_covers_its_area() {
+        let mut mesh = MeshBuffers::default();
+        floor_mesh(&rect_room(4.0, 3.0), &mut mesh);
+        assert_eq!(mesh.triangle_count(), 2); // n - 2 for a 4-gon
+        let mut area = 0.0;
+        for [a, b, c] in mesh_triangles(&mesh) {
+            let normal = (b - a).cross(c - a);
+            assert!(normal.y > 0.0, "floor triangle faces down: {normal}");
+            area += normal.length() * 0.5;
+        }
+        assert!((area - 12.0).abs() < 1e-4, "area {area}");
+    }
+
+    #[test]
+    fn deleting_walls_never_reshapes_the_floor() {
+        // The floor is the document's footprint, not a function of the walls: delete
+        // one, two, or all of them and the floor stays the full 4×3 = 12.
+        for delete_count in 0..=4 {
+            let mut scene = rect_room(4.0, 3.0);
+            for id in 0..delete_count {
+                scene.apply(Command::DeleteWall(id));
+            }
+            assert_eq!(scene.walls.len(), (4 - delete_count) as usize);
+            let mut mesh = MeshBuffers::default();
+            floor_mesh(&scene, &mut mesh);
+            assert_eq!(mesh.triangle_count(), 2, "{delete_count} deleted: floor changed");
+            let area: f32 = mesh_triangles(&mesh)
+                .into_iter()
+                .map(|[a, b, c]| (b - a).cross(c - a).length() * 0.5)
+                .sum();
+            assert!((area - 12.0).abs() < 1e-4, "{delete_count} deleted: area {area}");
+        }
+    }
+
+    #[test]
+    fn concave_l_room_triangulates_without_spilling_outside() {
+        // An L: 6 vertices, so 4 triangles, and the covered area is the L, not its bbox.
+        let mut scene = Scene::default();
+        let corners = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(4.0, 0.0),
+            Vec2::new(4.0, 2.0),
+            Vec2::new(2.0, 2.0),
+            Vec2::new(2.0, 4.0),
+            Vec2::new(0.0, 4.0),
+        ];
+        for i in 0..6 {
+            scene.apply(Command::AddWall(Wall {
+                id: i as u32,
+                start: corners[i],
+                end: corners[(i + 1) % 6],
+                thickness: 0.12,
+                height: 2.5,
+            }));
+        }
+        scene.apply(Command::SetFloorOutline(corners));
+        let mut mesh = MeshBuffers::default();
+        floor_mesh(&scene, &mut mesh);
+        assert_eq!(mesh.triangle_count(), 4);
+        let mut area = 0.0;
+        for [a, b, c] in mesh_triangles(&mesh) {
+            assert!((b - a).cross(c - a).y > 0.0, "triangle faces down");
+            area += (b - a).cross(c - a).length() * 0.5;
+        }
+        // L area = 4×2 + 2×2 = 12, strictly less than the 4×4 = 16 bounding box.
+        assert!((area - 12.0).abs() < 1e-4, "area {area}");
     }
 
     #[test]

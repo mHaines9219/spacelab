@@ -1,52 +1,460 @@
 import { useEffect, useRef, useState } from "react";
-import { createViewport, type Stats } from "./viewport";
+import {
+  createViewport,
+  type Selection,
+  type Stats,
+  type ViewportHandle,
+} from "./viewport";
+import { DrawEditor } from "./DrawEditor";
+
+const M_PER_FT = 0.3048;
+const M_PER_IN = 0.0254;
+const feetInchesToM = (ft: number, inch: number) => ft * M_PER_FT + inch * M_PER_IN;
+const mToParts = (m: number) => {
+  const totalIn = m / M_PER_IN;
+  let ft = Math.floor(totalIn / 12);
+  let inch = Math.round(totalIn - ft * 12);
+  if (inch === 12) {
+    ft += 1;
+    inch = 0;
+  }
+  return { ft, inch };
+};
+
+type Stage = "choose" | "rectangle" | "square" | "draw" | "scene";
+type Room = { widthM: number; depthM: number; square: boolean };
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const handleRef = useRef<ViewportHandle | null>(null);
+  const [stage, setStage] = useState<Stage>("choose");
+  const [room, setRoom] = useState<Room | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
+  const [wallSel, setWallSel] = useState<number | null>(null);
+  const [addMode, setAddMode] = useState(false);
+  const [floor, setFloor] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
-    let dispose: (() => void) | undefined;
-    createViewport(canvas, setStats).then(
-      (teardown) => (dispose = teardown),
+    createViewport(canvas, setStats, setSelection, setWallSel, setAddMode).then(
+      (handle) => (handleRef.current = handle),
       (cause) => setError(String(cause)),
     );
-    return () => dispose?.();
+    return () => handleRef.current?.dispose();
   }, []);
+
+  // Cmd/Ctrl+Z undoes the last action. Skipped while a text field is focused so the
+  // browser's own text undo still works there.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isUndo =
+        (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey;
+      if (!isUndo || stage !== "scene") return;
+      if (document.activeElement instanceof HTMLInputElement) return;
+      e.preventDefault();
+      const result = handleRef.current?.undo();
+      if (!result) return;
+      if (result.empty) {
+        setRoom(null);
+        setStage("choose");
+        return;
+      }
+      setFloor(result.floorIndex);
+      setRoom((prev) =>
+        prev && result.room
+          ? { ...prev, widthM: result.room.widthM, depthM: result.room.depthM }
+          : prev,
+      );
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stage]);
 
   return (
     <>
       <canvas ref={canvasRef} />
-      <div className="hud">
-        <strong>M0 spike</strong>
-        {error ? (
-          <span className="error">{error}</span>
-        ) : stats ? (
-          <>
-            <Row label="fps" value={stats.fps.toFixed(0)} />
-            <Row label="frame" value={`${stats.frameMs.toFixed(2)} ms`} />
-            <Row label="render (cpu)" value={`${stats.renderMs.toFixed(2)} ms`} />
-            <Row
-              label="rust↔js drag"
-              value={`${stats.dragUs.toFixed(2)} µs`}
+
+      {stage === "choose" && <ChooseScreen onPick={setStage} />}
+
+      {(stage === "rectangle" || stage === "square") && (
+        <RoomForm
+          kind={stage}
+          onBack={() => setStage("choose")}
+          onCreate={(widthM, depthM) => {
+            handleRef.current?.setRectangle(widthM, depthM);
+            setRoom({ widthM, depthM, square: stage === "square" });
+            setStage("scene");
+          }}
+        />
+      )}
+
+      {stage === "draw" && (
+        <DrawEditor
+          onBack={() => setStage("choose")}
+          onComplete={(coordsM) => {
+            handleRef.current?.setPolygon(coordsM);
+            setRoom(null); // freeform: no rectangle to resize by dimensions
+            setStage("scene");
+          }}
+        />
+      )}
+
+      {stage === "scene" && (
+        <>
+          <div className="hud">
+            <strong>spacelab</strong>
+            {error ? (
+              <span className="error">{error}</span>
+            ) : stats ? (
+              <>
+                <Row label="fps" value={stats.fps.toFixed(0)} />
+                <Row label="frame" value={`${stats.frameMs.toFixed(2)} ms`} />
+                <Row label="triangles" value={stats.triangles.toLocaleString()} />
+                <Row label="anchor" value={stats.snapped ? "against wall" : "floor"} />
+              </>
+            ) : (
+              <span>loading…</span>
+            )}
+            <button
+              type="button"
+              className="reset"
+              onClick={() => setStage("choose")}
+            >
+              new floor plan
+            </button>
+            <button
+              type="button"
+              className="reset"
+              onClick={() => handleRef.current?.startAddWall()}
+            >
+              add wall
+            </button>
+            <span className="hint">
+              click a wall or the chair to select
+            </span>
+          </div>
+
+          {addMode && (
+            <div className="banner">
+              click two points to place a wall · Esc to cancel
+            </div>
+          )}
+
+          {wallSel !== null && (
+            <div className="panel">
+              <strong>wall</strong>
+              <span className="hint">press Delete to remove</span>
+              <button
+                type="button"
+                className="reset"
+                onClick={() => handleRef.current?.deleteSelectedWall()}
+              >
+                delete wall
+              </button>
+            </div>
+          )}
+
+          {room && (
+            <RoomSizePanel
+              room={room}
+              onResize={(widthM, depthM) => {
+                handleRef.current?.setRectangle(widthM, depthM);
+                setRoom({ ...room, widthM, depthM });
+              }}
             />
-            <Row label="triangles" value={stats.triangles.toLocaleString()} />
-            <Row
-              label="wasm"
-              value={
-                stats.wasmBytes ? `${(stats.wasmBytes / 1024).toFixed(0)} KB` : "—"
+          )}
+
+          {selection && (
+            <SelectionPanel
+              dims={selection.dims}
+              onSetDimension={(axis, inches) =>
+                handleRef.current?.setDimension(axis, inches)
               }
+              onReset={() => handleRef.current?.resetScale()}
             />
-            <Row label="anchor" value={stats.snapped ? "against wall" : "floor"} />
-          </>
-        ) : (
-          <span>loading…</span>
-        )}
-        <span className="hint">drag the chair · orbit to look around</span>
-      </div>
+          )}
+
+          <FloorPicker
+            active={floor}
+            onPick={(i) => {
+              handleRef.current?.setFloorMaterial(i);
+              setFloor(i);
+            }}
+          />
+        </>
+      )}
     </>
+  );
+}
+
+function ChooseScreen({ onPick }: { onPick: (stage: Stage) => void }) {
+  const cards: { kind: Stage; title: string; blurb: string }[] = [
+    { kind: "rectangle", title: "Rectangle", blurb: "Enter a length and width" },
+    { kind: "square", title: "Square", blurb: "Enter one side length" },
+    { kind: "draw", title: "Draw", blurb: "Trace the room yourself" },
+  ];
+  return (
+    <div className="overlay">
+      <div className="choose">
+        <h1>New floor plan</h1>
+        <p className="sub">How would you like to start?</p>
+        <div className="cards">
+          {cards.map((c) => (
+            <button key={c.kind} type="button" className="card" onClick={() => onPick(c.kind)}>
+              <span className="card-title">{c.title}</span>
+              <span className="card-blurb">{c.blurb}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoomForm({
+  kind,
+  onBack,
+  onCreate,
+}: {
+  kind: "rectangle" | "square";
+  onBack: () => void;
+  onCreate: (widthM: number, depthM: number) => void;
+}) {
+  const [wFt, setWFt] = useState("12");
+  const [wIn, setWIn] = useState("0");
+  const [dFt, setDFt] = useState("10");
+  const [dIn, setDIn] = useState("0");
+
+  const widthM = feetInchesToM(Number(wFt) || 0, Number(wIn) || 0);
+  const depthM = feetInchesToM(Number(dFt) || 0, Number(dIn) || 0);
+  const square = kind === "square";
+  const valid = widthM >= 0.3 && (square || depthM >= 0.3);
+
+  return (
+    <div className="overlay">
+      <div className="form">
+        <h1>{square ? "Square room" : "Rectangular room"}</h1>
+        <FeetInches
+          label={square ? "Side" : "Width"}
+          ft={wFt}
+          inch={wIn}
+          onFt={setWFt}
+          onInch={setWIn}
+        />
+        {!square && (
+          <FeetInches label="Depth" ft={dFt} inch={dIn} onFt={setDFt} onInch={setDIn} />
+        )}
+        <div className="form-actions">
+          <button type="button" className="reset" onClick={onBack}>
+            back
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={!valid}
+            onClick={() => onCreate(widthM, square ? widthM : depthM)}
+          >
+            create room
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FeetInches({
+  label,
+  ft,
+  inch,
+  onFt,
+  onInch,
+}: {
+  label: string;
+  ft: string;
+  inch: string;
+  onFt: (v: string) => void;
+  onInch: (v: string) => void;
+}) {
+  return (
+    <label className="row feet-inches">
+      <span>{label}</span>
+      <span className="field">
+        <input type="number" min="0" value={ft} onChange={(e) => onFt(e.target.value)} />
+        <span className="unit">ft</span>
+        <input
+          type="number"
+          min="0"
+          max="11"
+          value={inch}
+          onChange={(e) => onInch(e.target.value)}
+        />
+        <span className="unit">in</span>
+      </span>
+    </label>
+  );
+}
+
+function RoomSizePanel({
+  room,
+  onResize,
+}: {
+  room: Room;
+  onResize: (widthM: number, depthM: number) => void;
+}) {
+  // Draft feet/inches, re-synced whenever the room dimensions change upstream.
+  const [w, setW] = useState(mToParts(room.widthM));
+  const [d, setD] = useState(mToParts(room.depthM));
+  useEffect(() => {
+    setW(mToParts(room.widthM));
+    setD(mToParts(room.depthM));
+  }, [room.widthM, room.depthM]);
+
+  const commit = (wp: { ft: number; inch: number }, dp: { ft: number; inch: number }) => {
+    const widthM = feetInchesToM(wp.ft, wp.inch);
+    const depthM = feetInchesToM(dp.ft, dp.inch);
+    if (widthM >= 0.3 && depthM >= 0.3) onResize(widthM, room.square ? widthM : depthM);
+  };
+
+  const row = (
+    label: string,
+    parts: { ft: number; inch: number },
+    set: (p: { ft: number; inch: number }) => void,
+    other: { ft: number; inch: number },
+    isWidth: boolean,
+  ) => (
+    <label className="row">
+      <span>{label}</span>
+      <span className="field">
+        <input
+          type="number"
+          min="0"
+          value={parts.ft}
+          onChange={(e) => set({ ...parts, ft: Number(e.target.value) || 0 })}
+          onBlur={() => (isWidth ? commit(parts, other) : commit(other, parts))}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+        <span className="unit">ft</span>
+        <input
+          type="number"
+          min="0"
+          max="11"
+          value={parts.inch}
+          onChange={(e) => set({ ...parts, inch: Number(e.target.value) || 0 })}
+          onBlur={() => (isWidth ? commit(parts, other) : commit(other, parts))}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+        <span className="unit">in</span>
+      </span>
+    </label>
+  );
+
+  return (
+    <div className="room">
+      <strong>room size</strong>
+      {row(room.square ? "side" : "width", w, setW, d, true)}
+      {!room.square && row("depth", d, setD, w, false)}
+    </div>
+  );
+}
+
+const AXES = ["width", "depth", "height"] as const;
+
+function SelectionPanel({
+  dims,
+  onSetDimension,
+  onReset,
+}: {
+  dims: [number, number, number];
+  onSetDimension: (axis: number, inches: number) => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="panel">
+      <strong>chair</strong>
+      <span className="hint">
+        ← → rotate · ↑ ↓ resize · type for exact size · R reset
+      </span>
+      {AXES.map((axis, i) => (
+        <DimensionField
+          key={axis}
+          label={axis}
+          inches={dims[i]}
+          onCommit={(inches) => onSetDimension(i, inches)}
+        />
+      ))}
+      <button type="button" className="reset" onClick={onReset}>
+        reset to original size
+      </button>
+    </div>
+  );
+}
+
+function DimensionField({
+  label,
+  inches,
+  onCommit,
+}: {
+  label: string;
+  inches: number;
+  onCommit: (inches: number) => void;
+}) {
+  const [draft, setDraft] = useState(inches.toFixed(1));
+  useEffect(() => setDraft(inches.toFixed(1)), [inches]);
+
+  const commit = () => {
+    const value = Number(draft);
+    if (Number.isFinite(value) && value > 0) onCommit(value);
+    else setDraft(inches.toFixed(1));
+  };
+
+  return (
+    <label className="row">
+      <span>{label}</span>
+      <span className="field">
+        <input
+          type="number"
+          min="0.1"
+          step="0.5"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+        />
+        <span className="unit">in</span>
+      </span>
+    </label>
+  );
+}
+
+const FLOORS = ["Light wood", "Dark wood", "Tile", "Concrete"] as const;
+
+function FloorPicker({
+  active,
+  onPick,
+}: {
+  active: number;
+  onPick: (index: number) => void;
+}) {
+  return (
+    <div className="floors">
+      <strong>floor</strong>
+      <div className="swatches">
+        {FLOORS.map((label, i) => (
+          <button
+            key={label}
+            type="button"
+            className={i === active ? "swatch active" : "swatch"}
+            onClick={() => onPick(i)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
