@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createViewport,
+  type CatalogEntry,
   type Selection,
   type Stats,
   type ViewportHandle,
 } from "./viewport";
 import { DrawEditor } from "./DrawEditor";
+import { CatalogPanel } from "./CatalogPanel";
 
 const M_PER_FT = 0.3048;
 const M_PER_IN = 0.0254;
@@ -132,7 +134,7 @@ export function App() {
               add wall
             </button>
             <span className="hint">
-              click a wall or the chair to select
+              click a wall or furniture to select
             </span>
           </div>
 
@@ -168,13 +170,19 @@ export function App() {
 
           {selection && (
             <SelectionPanel
+              title={selection.title}
               dims={selection.dims}
               onSetDimension={(axis, inches) =>
                 handleRef.current?.setDimension(axis, inches)
               }
               onReset={() => handleRef.current?.resetScale()}
+              onRemove={() => handleRef.current?.removeSelected()}
             />
           )}
+
+          <CatalogPanel
+            onPlace={(entry: CatalogEntry) => handleRef.current?.addFromCatalog(entry)}
+          />
 
           <FloorPicker
             active={floor}
@@ -362,19 +370,23 @@ function RoomSizePanel({
 const AXES = ["width", "depth", "height"] as const;
 
 function SelectionPanel({
+  title,
   dims,
   onSetDimension,
   onReset,
+  onRemove,
 }: {
+  title: string;
   dims: [number, number, number];
   onSetDimension: (axis: number, inches: number) => void;
   onReset: () => void;
+  onRemove: () => void;
 }) {
   return (
     <div className="panel">
-      <strong>chair</strong>
+      <strong>{title}</strong>
       <span className="hint">
-        ← → rotate · ↑ ↓ resize · type for exact size · R reset
+        ← → rotate · ↑ ↓ resize · type for exact size · R reset · Del remove
       </span>
       {AXES.map((axis, i) => (
         <DimensionField
@@ -384,9 +396,14 @@ function SelectionPanel({
           onCommit={(inches) => onSetDimension(i, inches)}
         />
       ))}
-      <button type="button" className="reset" onClick={onReset}>
-        reset to original size
-      </button>
+      <div className="panel-actions">
+        <button type="button" className="reset" onClick={onReset}>
+          reset size
+        </button>
+        <button type="button" className="reset danger" onClick={onRemove}>
+          remove
+        </button>
+      </div>
     </div>
   );
 }

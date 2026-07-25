@@ -1,13 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import init, { Document } from "./wasm/wasm_bindings.js";
-
-// Front vector measured off the GLB: the backrest sits at -Z, so the model already
-// faces +Z and needs no correction. Real catalog assets will not be so lucky.
-const CHAIR_URL = "/assets/sheen-chair.glb";
-const CHAIR_FRONT_YAW = 0;
 
 const TEX_ROOT = "/assets/textures";
 // Directory per floor finish; index matches Rust's `FloorMaterial` ordinal.
@@ -70,11 +66,28 @@ export type Stats = {
   wasmBytes: number;
 };
 
-/** Real-world size in inches `[width, depth, height]`, or null when nothing is selected. */
-export type Selection = { dims: [number, number, number] } | null;
+/** One catalog asset, as read from `/assets/catalog.json`. */
+export type CatalogEntry = {
+  asset_id: string;
+  title: string;
+  category: string | null;
+  tags: string[];
+  dims_m: { w: number; h: number; d: number };
+  blob: string; // e.g. "models/couch-medium.glb", served from /assets/
+};
+
+/**
+ * The selected furnishing's title and real-world size in inches `[width, depth, height]`,
+ * or null when nothing is selected.
+ */
+export type Selection = { title: string; dims: [number, number, number] } | null;
 
 export type ViewportHandle = {
   dispose: () => void;
+  /** Place a catalog asset in the room and select it. */
+  addFromCatalog: (entry: CatalogEntry) => Promise<void>;
+  /** Remove the selected furnishing, if any. */
+  removeSelected: () => void;
   /** Set one dimension in inches: axis 0 = width, 1 = depth, 2 = height. */
   setDimension: (axis: number, inches: number) => void;
   /** Restore the selected asset to its catalog proportions. */
@@ -232,50 +245,142 @@ export async function createViewport(
     onWall(id);
   };
 
-  const chair = new THREE.Group();
-  chair.visible = false; // shown once a room exists
-  scene.add(chair);
-  const gltf = await new GLTFLoader().loadAsync(CHAIR_URL);
-  gltf.scene.rotation.y = CHAIR_FRONT_YAW;
-  gltf.scene.traverse((node) => {
-    if ((node as THREE.Mesh).isMesh) {
-      node.castShadow = true;
-      node.receiveShadow = true;
-    }
-  });
-  chair.add(gltf.scene);
-
-  // Selection outline: an edge box at the asset's catalog size, parented to the
-  // chair so it inherits position, yaw, and scale for free. dimensions() reads
-  // inches at the current (unit) scale, so this is the true base extent.
-  const base = doc.dimensions();
-  const [bw, bd, bh] = [base[0] / IN_PER_M, base[1] / IN_PER_M, base[2] / IN_PER_M];
-  const selectionBox = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(bw, bh, bd)),
-    new THREE.LineBasicMaterial({ color: 0x5b9dff }),
-  );
-  selectionBox.position.y = bh / 2;
-  selectionBox.visible = false;
-  chair.add(selectionBox);
-
+  // --- Furnishings ---------------------------------------------------------
+  // Rust owns placement; JS owns which GLB draws each furnishing id. `placed` maps id
+  // → catalog entry and PERSISTS (ids are never reused), so an undo that restores a
+  // removed furnishing can rebuild its mesh from the cached template synchronously.
+  const gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  const templates = new Map<string, THREE.Group>(); // resolved GLB scene per url
+  const templateLoads = new Map<string, Promise<THREE.Group>>(); // in-flight dedupe
+  type Furnishing3D = { group: THREE.Group; box: THREE.LineSegments; entry: CatalogEntry };
+  const furnishings = new Map<number, Furnishing3D>();
+  const placed = new Map<number, CatalogEntry>();
+  let selectedId: number | null = null;
   let snapped = false;
-  const applyTransform = (out: Float32Array) => {
-    chair.position.set(out[0], out[1], out[2]);
-    chair.rotation.y = out[3];
-    chair.scale.set(out[4], out[5], out[6]);
-    snapped = out[7] === 1;
-  };
-  const place = (x: number, z: number) => applyTransform(doc.drag(x, z));
 
-  let selected = false;
-  const select = (on: boolean) => {
-    selected = on;
-    selectionBox.visible = on;
-    onSelection(on ? { dims: [...doc.dimensions()] as [number, number, number] } : null);
+  const urlOf = (entry: CatalogEntry) => `/assets/${entry.blob}`;
+
+  async function getTemplate(url: string): Promise<THREE.Group> {
+    const cached = templates.get(url);
+    if (cached) return cached;
+    let load = templateLoads.get(url);
+    if (!load) {
+      load = gltfLoader.loadAsync(url).then((gltf) => {
+        gltf.scene.traverse((node) => {
+          if ((node as THREE.Mesh).isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+        templates.set(url, gltf.scene);
+        templateLoads.delete(url);
+        return gltf.scene;
+      });
+      templateLoads.set(url, load);
+    }
+    return load;
+  }
+
+  // Build the scene object for an id from an already-resolved template (sync).
+  const buildFurnishing = (id: number, entry: CatalogEntry, template: THREE.Group) => {
+    const group = new THREE.Group();
+    group.userData.furnishingId = id;
+    group.add(template.clone(true));
+    const { w, h, d } = entry.dims_m;
+    const box = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
+      new THREE.LineBasicMaterial({ color: 0x5b9dff }),
+    );
+    box.position.y = h / 2;
+    box.visible = id === selectedId;
+    group.add(box);
+    scene.add(group);
+    furnishings.set(id, { group, box, entry });
+    applyTransformFor(id, doc.furnishing_transform(id));
+  };
+
+  const disposeFurnishing = (f: Furnishing3D) => {
+    scene.remove(f.group);
+    f.box.geometry.dispose();
+    (f.box.material as THREE.Material).dispose();
+    // GLB geometries/materials are shared templates; leave them for reuse.
+  };
+
+  function applyTransformFor(id: number, out: Float32Array) {
+    const f = furnishings.get(id);
+    if (!f || out.length < 8) return;
+    f.group.position.set(out[0], out[1], out[2]);
+    f.group.rotation.y = out[3];
+    f.group.scale.set(out[4], out[5], out[6]);
+    if (id === selectedId) snapped = out[7] === 1;
+  }
+
+  const selectionPayload = (): Selection =>
+    selectedId === null
+      ? null
+      : {
+          title: furnishings.get(selectedId)?.entry.title ?? "furnishing",
+          dims: [...doc.dimensions()] as [number, number, number],
+        };
+
+  const selectFurnishing = (id: number | null) => {
+    selectedId = id;
+    if (id === null) doc.deselect();
+    else doc.select(id);
+    for (const [fid, f] of furnishings) f.box.visible = fid === id;
+    onSelection(selectionPayload());
+  };
+
+  const addFromCatalog = async (entry: CatalogEntry) => {
+    const { w, h, d } = entry.dims_m;
+    const id = doc.add_furnishing(w, h, d);
+    placed.set(id, entry);
+    const template = await getTemplate(urlOf(entry));
+    selectedId = id; // so the fresh mesh shows its selection box
+    buildFurnishing(id, entry, template);
+    selectFurnishing(id);
+  };
+
+  const removeSelected = () => {
+    if (selectedId === null) return;
+    const id = selectedId;
+    if (!doc.remove_selected()) return;
+    const f = furnishings.get(id);
+    if (f) {
+      disposeFurnishing(f);
+      furnishings.delete(id);
+    }
+    selectFurnishing(null);
+  };
+
+  // Reconcile the furnishing meshes with the document after an undo, which can add,
+  // remove, or move any of them. Synchronous: any id that can reappear was placed
+  // before, so its template is already cached.
+  const reconcileFurnishings = () => {
+    const ids = new Set(doc.furnishing_ids());
+    for (const [id, f] of [...furnishings]) {
+      if (!ids.has(id)) {
+        disposeFurnishing(f);
+        furnishings.delete(id);
+      }
+    }
+    for (const id of ids) {
+      if (!furnishings.has(id)) {
+        const entry = placed.get(id);
+        const template = entry && templates.get(urlOf(entry));
+        if (entry && template) buildFurnishing(id, entry, template);
+      }
+      applyTransformFor(id, doc.furnishing_transform(id));
+    }
+  };
+
+  const place = (x: number, z: number) => {
+    if (selectedId !== null) applyTransformFor(selectedId, doc.drag(x, z));
   };
 
   // Timed in a batch rather than per pointer move: a single call lands under
   // performance.now()'s resolution, so per-move sampling only measures the clock.
+  // With nothing selected this measures the bare boundary round-trip.
   const dragUs = (() => {
     const samples = 2000;
     const start = performance.now();
@@ -299,6 +404,13 @@ export async function createViewport(
     raycaster.setFromCamera(pointer, camera);
   };
 
+  // Walk up from a raycast hit to the furnishing group that carries the id.
+  const furnishingIdAt = (object: THREE.Object3D): number | null => {
+    let o: THREE.Object3D | null = object;
+    while (o && o.userData.furnishingId === undefined) o = o.parent;
+    return o ? (o.userData.furnishingId as number) : null;
+  };
+
   canvas.addEventListener("pointerdown", (event) => {
     aimAt(event);
 
@@ -316,23 +428,28 @@ export async function createViewport(
       return;
     }
 
-    // Chair takes priority, then walls, then empty space.
-    if (raycaster.intersectObject(chair, true).length > 0) {
-      selectWall(null);
-      select(true);
-      dragging = true;
-      dragMoved = false;
-      controls.enabled = false;
-      canvas.setPointerCapture(event.pointerId);
-      return;
+    // Furnishings take priority, then walls, then empty space.
+    const groups = [...furnishings.values()].map((f) => f.group);
+    const furnishingHit = groups.length ? raycaster.intersectObjects(groups, true)[0] : undefined;
+    if (furnishingHit) {
+      const id = furnishingIdAt(furnishingHit.object);
+      if (id !== null) {
+        selectWall(null);
+        selectFurnishing(id);
+        dragging = true;
+        dragMoved = false;
+        controls.enabled = false;
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
     }
     const wallHit = raycaster.intersectObjects(wallPicks.children, false)[0];
     if (wallHit) {
-      select(false);
+      selectFurnishing(null);
       selectWall(wallHit.object.userData.wallId as number);
       return;
     }
-    select(false);
+    selectFurnishing(null);
     selectWall(null);
   });
 
@@ -354,34 +471,42 @@ export async function createViewport(
       setAddMode(false);
       return;
     }
-    if ((event.key === "Delete" || event.key === "Backspace") && selectedWall !== null) {
-      deleteSelectedWall();
-      event.preventDefault();
-      return;
+    if (event.key === "Delete" || event.key === "Backspace") {
+      // A selected furnishing takes the delete; otherwise a selected wall does.
+      if (selectedId !== null) {
+        removeSelected();
+        event.preventDefault();
+        return;
+      }
+      if (selectedWall !== null) {
+        deleteSelectedWall();
+        event.preventDefault();
+        return;
+      }
     }
-    if (!selected) return;
+    if (selectedId === null) return;
     switch (event.key) {
       case "ArrowLeft":
-        applyTransform(doc.rotate(-1)); // clockwise
+        applyTransformFor(selectedId, doc.rotate(-1)); // clockwise
         break;
       case "ArrowRight":
-        applyTransform(doc.rotate(1)); // counter-clockwise
+        applyTransformFor(selectedId, doc.rotate(1)); // counter-clockwise
         break;
       case "ArrowUp":
-        applyTransform(doc.scale_by(1));
-        select(true); // refresh the dimensions panel
+        applyTransformFor(selectedId, doc.scale_by(1));
+        refreshSelection();
         break;
       case "ArrowDown":
-        applyTransform(doc.scale_by(-1));
-        select(true);
+        applyTransformFor(selectedId, doc.scale_by(-1));
+        refreshSelection();
         break;
       case "r":
       case "R":
-        applyTransform(doc.reset_scale());
-        select(true);
+        applyTransformFor(selectedId, doc.reset_scale());
+        refreshSelection();
         break;
       case "Escape":
-        select(false);
+        selectFurnishing(null);
         return;
       default:
         return;
@@ -389,6 +514,10 @@ export async function createViewport(
     event.preventDefault();
   };
   window.addEventListener("keydown", onKey);
+
+  const refreshSelection = () => {
+    if (selectedId !== null) onSelection(selectionPayload());
+  };
 
   canvas.addEventListener("pointermove", (event) => {
     if (!dragging) return;
@@ -442,13 +571,13 @@ export async function createViewport(
     controls.update();
   };
 
-  // A room was (re)generated: rebuild geometry, drop the chair in, reveal it, reframe.
+  // A room was (re)generated: rebuild geometry and reframe. Furnishings persist and
+  // keep their transforms across a room edit.
   const showRoom = () => {
     syncRoomGeometry();
     rebuildWallPicks();
     selectWall(null);
-    applyTransform(doc.chair_transform());
-    chair.visible = true;
+    for (const id of doc.furnishing_ids()) applyTransformFor(id, doc.furnishing_transform(id));
     frameCamera();
   };
 
@@ -500,22 +629,24 @@ export async function createViewport(
   });
 
   const setDimension = (axis: number, inches: number) => {
-    applyTransform(doc.set_dimension(axis, inches));
-    if (selected) {
-      onSelection({ dims: [...doc.dimensions()] as [number, number, number] });
-    }
+    if (selectedId === null) return;
+    applyTransformFor(selectedId, doc.set_dimension(axis, inches));
+    refreshSelection();
   };
 
-  // Dev-only probe so the e2e test can read yaw (scale/reset are visible in the
-  // panel; rotation isn't). Stripped from production by the `import.meta.env.DEV` gate.
+  // Dev-only probes so the e2e test can read state that isn't visible in the DOM.
+  // Stripped from production by the `import.meta.env.DEV` gate.
   if (import.meta.env.DEV) {
     const probe = window as unknown as {
-      __chairYaw?: () => number;
+      __selectedYaw?: () => number | null;
+      __furnishingCount?: () => number;
       __wallCount?: () => number;
       __floorTris?: () => number;
       __deleteWallById?: (id: number) => void;
     };
-    probe.__chairYaw = () => chair.rotation.y;
+    probe.__selectedYaw = () =>
+      selectedId !== null ? (furnishings.get(selectedId)?.group.rotation.y ?? null) : null;
+    probe.__furnishingCount = () => furnishings.size;
     probe.__wallCount = () => wallPicks.children.length;
     probe.__floorTris = () => (floorMesh.geometry.index?.count ?? 0) / 3;
     probe.__deleteWallById = (id: number) => {
@@ -526,10 +657,9 @@ export async function createViewport(
   }
 
   const resetScale = () => {
-    applyTransform(doc.reset_scale());
-    if (selected) {
-      onSelection({ dims: [...doc.dimensions()] as [number, number, number] });
-    }
+    if (selectedId === null) return;
+    applyTransformFor(selectedId, doc.reset_scale());
+    refreshSelection();
   };
 
   // The choice lives in the Rust document; JS just binds the matching material.
@@ -545,6 +675,8 @@ export async function createViewport(
       controls.dispose();
       renderer.dispose();
     },
+    addFromCatalog,
+    removeSelected,
     setDimension,
     resetScale,
     setFloorMaterial,
@@ -563,7 +695,7 @@ export async function createViewport(
     wallSegments: () => Array.from(doc.wall_segments()),
     wallIds: () => Array.from(doc.wall_ids()),
     startAddWall: () => {
-      select(false);
+      selectFurnishing(null);
       selectWall(null);
       setAddMode(true);
     },
@@ -573,13 +705,12 @@ export async function createViewport(
       // Undo can touch anything, so re-sync the whole scene from the restored document.
       syncRoomGeometry();
       rebuildWallPicks();
-      select(false);
       selectWall(null);
       if (addMode) setAddMode(false);
       floorMesh.material = floorMaterials[doc.floor_material()];
+      reconcileFurnishings();
+      selectFurnishing(null);
       const hasRoom = doc.has_room();
-      chair.visible = hasRoom;
-      applyTransform(doc.chair_transform());
       const [minX, minZ, maxX, maxZ] = doc.room_bounds();
       return {
         floorIndex: doc.floor_material(),

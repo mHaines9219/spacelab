@@ -5,6 +5,9 @@
   "scripts": {
     "wasm": "wasm-pack build ../crates/wasm-bindings --target web --out-dir ../../web/src/wasm --out-name wasm_bindings",
     "textures": "bash scripts/fetch-textures.sh",
+    "ingest:build": "node scripts/ingest.mjs",
+    "ingest:kenney": "node scripts/kenney.mjs",
+    "ingest:selftest": "node scripts/normalize.mjs --self-test",
     "dev": "npm run wasm && vite",
     "build": "npm run wasm && tsc && vite build",
     "preview": "vite preview"
@@ -15,10 +18,15 @@
     "three": "^0.181.0"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.4.1",
+    "@gltf-transform/extensions": "^4.4.1",
+    "@gltf-transform/functions": "^4.4.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/three": "^0.181.0",
     "@vitejs/plugin-react": "^5.1.0",
+    "meshoptimizer": "^1.2.0",
+    "obj2gltf": "^3.2.0",
     "playwright": "^1.62.0",
     "typescript": "^5.9.0",
     "vite": "^7.2.0"

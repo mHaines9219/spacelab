@@ -1,0 +1,295 @@
+[
+  {
+    "asset_id": "couch-medium",
+    "title": "Couch, Medium (2-seat)",
+    "source": "Quaternius (CC0)",
+    "source_url": "https://poly.pizza/m/mWgQ94zhDZ",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "seating",
+    "tags": [
+      "sofa",
+      "couch",
+      "2-seat",
+      "living-room"
+    ],
+    "dims_m": {
+      "w": 1.964,
+      "h": 0.8,
+      "d": 0.923
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0.45,
+      "sides": 0,
+      "back": 0
+    },
+    "blob": "models/couch-medium.glb"
+  },
+  {
+    "asset_id": "table-round-large",
+    "title": "Round Table, Large",
+    "source": "CreativeTrio (CC0)",
+    "source_url": "https://poly.pizza/m/aG6qYcqcI0",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "table",
+    "tags": [
+      "table",
+      "round",
+      "pedestal",
+      "dining"
+    ],
+    "dims_m": {
+      "w": 1.2,
+      "h": 0.427,
+      "d": 1.2
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0.6,
+      "sides": 0.6,
+      "back": 0.6
+    },
+    "blob": "models/table-round-large.glb"
+  },
+  {
+    "asset_id": "nightstand",
+    "title": "Night Stand",
+    "source": "Quaternius (CC0)",
+    "source_url": "https://poly.pizza/m/9LI73c5uFA",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "storage",
+    "tags": [
+      "nightstand",
+      "bedside",
+      "drawer",
+      "bedroom"
+    ],
+    "dims_m": {
+      "w": 0.554,
+      "h": 0.55,
+      "d": 0.554
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0.4,
+      "sides": 0,
+      "back": 0
+    },
+    "blob": "models/nightstand.glb"
+  },
+  {
+    "asset_id": "floor-lamp",
+    "title": "Floor Lamp",
+    "source": "Quaternius (CC0)",
+    "source_url": "https://poly.pizza/m/eBQtooeh43",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "lighting",
+    "tags": [
+      "floor-lamp",
+      "lamp",
+      "lighting"
+    ],
+    "dims_m": {
+      "w": 0.263,
+      "h": 1.5,
+      "d": 0.276
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0,
+      "sides": 0,
+      "back": 0
+    },
+    "blob": "models/floor-lamp.glb"
+  },
+  {
+    "asset_id": "cabinet",
+    "title": "Cabinet",
+    "source": "CreativeTrio (CC0)",
+    "source_url": "https://poly.pizza/m/wOiMrnUuhe",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "storage",
+    "tags": [
+      "cabinet",
+      "sideboard",
+      "storage"
+    ],
+    "dims_m": {
+      "w": 0.907,
+      "h": 0.9,
+      "d": 0.546
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0.6,
+      "sides": 0,
+      "back": 0
+    },
+    "blob": "models/cabinet.glb"
+  },
+  {
+    "asset_id": "armchair",
+    "title": "Sheen Armchair",
+    "source": "Khronos glTF-Sample-Assets (© Wayfair)",
+    "source_url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SheenChair",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "seating",
+    "tags": [
+      "chair",
+      "armchair",
+      "accent",
+      "lounge"
+    ],
+    "dims_m": {
+      "w": 0.827,
+      "h": 0.686,
+      "d": 0.57
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0.4,
+      "sides": 0,
+      "back": 0
+    },
+    "blob": "models/armchair.glb"
+  },
+  {
+    "asset_id": "kenney-bed",
+    "title": "Bed (Double)",
+    "source": "Kenney Furniture Kit (CC0)",
+    "source_url": "https://kenney.nl/assets/furniture-kit",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "bed",
+    "tags": [
+      "bed",
+      "double",
+      "bedroom"
+    ],
+    "dims_m": {
+      "w": 1.7,
+      "h": 0.667,
+      "d": 2
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0,
+      "sides": 0.3,
+      "back": 0
+    },
+    "blob": "models/kenney-bed.glb"
+  },
+  {
+    "asset_id": "kenney-chair",
+    "title": "Chair",
+    "source": "Kenney Furniture Kit (CC0)",
+    "source_url": "https://kenney.nl/assets/furniture-kit",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "seating",
+    "tags": [
+      "chair",
+      "dining",
+      "desk"
+    ],
+    "dims_m": {
+      "w": 0.396,
+      "h": 0.9,
+      "d": 0.396
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0.4,
+      "sides": 0,
+      "back": 0
+    },
+    "blob": "models/kenney-chair.glb"
+  },
+  {
+    "asset_id": "kenney-bookcase",
+    "title": "Bookcase",
+    "source": "Kenney Furniture Kit (CC0)",
+    "source_url": "https://kenney.nl/assets/furniture-kit",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "storage",
+    "tags": [
+      "bookcase",
+      "shelf",
+      "storage"
+    ],
+    "dims_m": {
+      "w": 0.847,
+      "h": 1.8,
+      "d": 0.529
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": {
+      "front": 0.4,
+      "sides": 0,
+      "back": 0
+    },
+    "blob": "models/kenney-bookcase.glb"
+  },
+  {
+    "asset_id": "kenney-rug",
+    "title": "Rug",
+    "source": "Kenney Furniture Kit (CC0)",
+    "source_url": "https://kenney.nl/assets/furniture-kit",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "decor",
+    "tags": [
+      "rug",
+      "floor",
+      "decor"
+    ],
+    "dims_m": {
+      "w": 1.6,
+      "h": 0.01,
+      "d": 0.938
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": null,
+    "blob": "models/kenney-rug.glb"
+  },
+  {
+    "asset_id": "kenney-plant",
+    "title": "Potted Plant",
+    "source": "Kenney Furniture Kit (CC0)",
+    "source_url": "https://kenney.nl/assets/furniture-kit",
+    "license": "CC0-1.0",
+    "attribution": null,
+    "category": "decor",
+    "tags": [
+      "plant",
+      "greenery",
+      "decor"
+    ],
+    "dims_m": {
+      "w": 0.162,
+      "h": 0.5,
+      "d": 0.185
+    },
+    "anchor": "floor",
+    "front": "+Z",
+    "clearance_m": null,
+    "blob": "models/kenney-plant.glb"
+  }
+]

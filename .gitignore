@@ -4,6 +4,8 @@ dist/
 pkg/
 web/src/wasm/
 web/public/assets/textures/
+web/public/assets/models/
+web/assets-src/_kenney/
 *.wasm
 .DS_Store
 .env

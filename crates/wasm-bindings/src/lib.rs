@@ -12,7 +12,6 @@ use core_scene::{
 use glam::{Vec2, Vec3};
 use wasm_bindgen::prelude::*;
 
-const CHAIR: FurnishingId = 1;
 const SNAP_RADIUS: f32 = 0.35;
 /// Arrow-key rotate step: 15° per press.
 const ROTATE_STEP: f32 = std::f32::consts::PI / 12.0;
@@ -35,32 +34,26 @@ pub struct Document {
     walls: MeshBuffers,
     /// Undo stack: a snapshot of the scene taken before each user action.
     history: Vec<Scene>,
+    /// Next furnishing id to hand out. Monotonic; ids are never reused.
+    next_id: FurnishingId,
+    /// The furnishing the furniture ops (drag/rotate/scale) act on. UI state, not
+    /// document state, so it stays off the undo snapshots (which clone the Scene).
+    selected: Option<FurnishingId>,
 }
 
 #[wasm_bindgen]
 impl Document {
-    /// A blank document: no walls yet (the room comes from `set_rectangle`/`set_polygon`)
-    /// plus the one demo furnishing.
+    /// A blank document: no walls (the room comes from `set_rectangle`/`set_polygon`)
+    /// and no furnishings (the web places them from the catalog via `add_furnishing`).
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        let mut scene = Scene::default();
-        scene.apply(Command::AddFurnishing(Furnishing {
-            id: CHAIR,
-            asset: Asset {
-                extent: Vec3::new(0.83, 0.69, 0.57),
-            },
-            placement: Placement {
-                position: Vec3::ZERO,
-                yaw: 0.0,
-                anchor: Anchor::Floor,
-            },
-            scale: Vec3::ONE,
-        }));
         let mut document = Self {
-            scene,
+            scene: Scene::default(),
             floor: MeshBuffers::default(),
             walls: MeshBuffers::default(),
             history: Vec::new(),
+            next_id: 1,
+            selected: None,
         };
         document.rebuild();
         document
@@ -153,9 +146,7 @@ impl Document {
         }
         // The floor footprint is stored on the document, so later wall edits leave it be.
         self.scene.apply(Command::SetFloorOutline(points.to_vec()));
-        // Drop the furnishing into the middle of the fresh room.
-        let centre = points.iter().copied().sum::<Vec2>() / n as f32;
-        self.reseat(centre);
+        // Furnishings persist across room edits; the web re-reads their transforms.
         self.rebuild();
     }
 
@@ -251,69 +242,166 @@ impl Document {
         self.floor_material()
     }
 
-    // --- Furnishing manipulation ------------------------------------------
+    // --- Furnishing catalog & selection -----------------------------------
+
+    /// Place a catalog asset in the room and select it. `ex/ey/ez` are the asset's
+    /// real-world extent (width/height/depth, metres). Returns the new furnishing id;
+    /// the web maps that id to the catalog entry (which GLB to load). Drops at the room
+    /// centre (origin if no room yet), then reseats so it snaps if the centre is near a
+    /// wall.
+    pub fn add_furnishing(&mut self, ex: f32, ey: f32, ez: f32) -> u32 {
+        self.checkpoint();
+        let id = self.next_id;
+        self.next_id += 1;
+        // Stagger successive drops so items don't stack exactly on the room centre.
+        let n = (self.scene.furnishings.len() % 5) as f32;
+        let drop = self.room_centre() + Vec2::splat(0.3) * n;
+        self.scene.apply(Command::AddFurnishing(Furnishing {
+            id,
+            asset: Asset {
+                extent: Vec3::new(ex, ey, ez),
+            },
+            placement: Placement {
+                position: Vec3::new(drop.x, 0.0, drop.y),
+                yaw: 0.0,
+                anchor: Anchor::Floor,
+            },
+            scale: Vec3::ONE,
+        }));
+        self.selected = Some(id);
+        self.reseat(id, drop);
+        id
+    }
+
+    /// Remove the selected furnishing (if any). Returns true if one was removed.
+    pub fn remove_selected(&mut self) -> bool {
+        match self.selected.take() {
+            Some(id) => {
+                self.checkpoint();
+                self.scene.apply(Command::RemoveFurnishing(id));
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Select a furnishing by id (no-op if it doesn't exist). Selection is UI state,
+    /// so it is not checkpointed.
+    pub fn select(&mut self, id: u32) {
+        if self.scene.furnishing(id).is_some() {
+            self.selected = Some(id);
+        }
+    }
+
+    pub fn deselect(&mut self) {
+        self.selected = None;
+    }
+
+    /// The selected furnishing id, or -1 if nothing is selected.
+    pub fn selected_id(&self) -> i32 {
+        self.selected.map_or(-1, |id| id as i32)
+    }
+
+    /// All furnishing ids, in placement order — the web iterates these to sync meshes.
+    pub fn furnishing_ids(&self) -> Vec<u32> {
+        self.scene.furnishings.iter().map(|f| f.id).collect()
+    }
+
+    /// Transform of a specific furnishing (empty if it doesn't exist). Used to re-place
+    /// meshes after a rebuild or undo.
+    pub fn furnishing_transform(&self, id: u32) -> Vec<f32> {
+        match self.scene.furnishing(id) {
+            Some(f) => transform_of(f),
+            None => Vec::new(),
+        }
+    }
+
+    // --- Selected-furnishing manipulation ---------------------------------
+    // Each op targets the selected furnishing and returns its transform, or an empty
+    // array if nothing is selected (or it vanished under an undo).
+
+    /// The selected id, but only if it still exists — a furnishing can vanish under an
+    /// undo while `selected` still points at it, and the ops must not touch a ghost.
+    fn live_selection(&self) -> Option<FurnishingId> {
+        self.selected
+            .filter(|id| self.scene.furnishing(*id).is_some())
+    }
 
     /// Drag hot path, called once per pointer move: cursor metres in, transform out.
     pub fn drag(&mut self, x: f32, z: f32) -> Vec<f32> {
-        self.reseat(Vec2::new(x, z))
+        match self.live_selection() {
+            Some(id) => self.reseat(id, Vec2::new(x, z)),
+            None => Vec::new(),
+        }
     }
 
     /// Rotate by `steps` arrow presses (positive = counter-clockwise). Spins in
-    /// place; the next drag re-snaps. Returns the transform.
+    /// place; the next drag re-snaps.
     pub fn rotate(&mut self, steps: f32) -> Vec<f32> {
+        let Some(id) = self.live_selection() else {
+            return Vec::new();
+        };
         self.checkpoint();
-        let yaw = self.furnishing().placement.yaw + steps * ROTATE_STEP;
-        self.scene.apply(Command::SetYaw { id: CHAIR, yaw });
-        self.transform()
+        let yaw = self.furnishing(id).placement.yaw + steps * ROTATE_STEP;
+        self.scene.apply(Command::SetYaw { id, yaw });
+        self.transform(id)
     }
 
     /// Uniform scale nudge: one `↑` press is `presses = 1`, one `↓` is `-1`.
     pub fn scale_by(&mut self, presses: f32) -> Vec<f32> {
+        let Some(id) = self.live_selection() else {
+            return Vec::new();
+        };
         self.checkpoint();
         let factor = SCALE_STEP.powf(presses);
-        let scale = self.furnishing().scale * factor;
-        self.set_scale(scale)
+        let scale = self.furnishing(id).scale * factor;
+        self.set_scale(id, scale)
     }
 
     /// Set one real-world dimension in inches: axis 0 = width, 1 = depth, 2 = height.
     pub fn set_dimension(&mut self, axis: u8, inches: f32) -> Vec<f32> {
+        let Some(id) = self.live_selection() else {
+            return Vec::new();
+        };
         self.checkpoint();
         let metres = (inches / M_TO_IN).max(MIN_DIMENSION_M);
-        let f = self.furnishing();
+        let f = self.furnishing(id);
         let mut scale = f.scale;
         match axis {
             0 => scale.x = metres / f.asset.extent.x,
             1 => scale.z = metres / f.asset.extent.z,
             _ => scale.y = metres / f.asset.extent.y,
         }
-        self.set_scale(scale)
+        self.set_scale(id, scale)
     }
 
-    /// Restore the asset to its catalog proportions (unit scale on every axis).
+    /// Restore the selected asset to its catalog proportions (unit scale on every axis).
     pub fn reset_scale(&mut self) -> Vec<f32> {
+        let Some(id) = self.live_selection() else {
+            return Vec::new();
+        };
         self.checkpoint();
-        self.set_scale(Vec3::ONE)
+        self.set_scale(id, Vec3::ONE)
     }
 
-    /// Current real-world size in inches as `[width, depth, height]`, for the panel.
+    /// Selected asset's current real-world size in inches as `[width, depth, height]`,
+    /// or empty if nothing is selected.
     pub fn dimensions(&self) -> Vec<f32> {
-        let f = self.furnishing();
+        let Some(id) = self.live_selection() else {
+            return Vec::new();
+        };
+        let f = self.furnishing(id);
         let d = f.asset.extent * f.scale * M_TO_IN;
         vec![d.x, d.z, d.y]
     }
 
-    /// The chair's current transform, for re-placing it after a room is (re)built.
-    pub fn chair_transform(&self) -> Vec<f32> {
-        self.transform()
-    }
-
-    fn furnishing(&self) -> Furnishing {
-        *self.scene.furnishing(CHAIR).expect("chair is added in new()")
+    fn furnishing(&self, id: FurnishingId) -> Furnishing {
+        *self.scene.furnishing(id).expect("furnishing id exists")
     }
 
     /// Effective footprint the constraint solver sees once scale is applied.
-    fn scaled_asset(&self) -> Asset {
-        let f = self.furnishing();
+    fn scaled_asset(&self, id: FurnishingId) -> Asset {
+        let f = self.furnishing(id);
         Asset {
             extent: f.asset.extent * f.scale,
         }
@@ -322,40 +410,50 @@ impl Document {
     /// Apply a new scale, then re-seat at the current position so a resized asset
     /// stays flush against its wall instead of clipping into or floating off it.
     /// Orientation is preserved: scaling never re-orients an asset the user rotated.
-    fn set_scale(&mut self, scale: Vec3) -> Vec<f32> {
-        let yaw = self.furnishing().placement.yaw;
-        self.scene.apply(Command::SetScale { id: CHAIR, scale });
-        let p = self.furnishing().placement.position;
-        self.reseat(Vec2::new(p.x, p.z));
-        self.scene.apply(Command::SetYaw { id: CHAIR, yaw });
-        self.transform()
+    fn set_scale(&mut self, id: FurnishingId, scale: Vec3) -> Vec<f32> {
+        let yaw = self.furnishing(id).placement.yaw;
+        self.scene.apply(Command::SetScale { id, scale });
+        let p = self.furnishing(id).placement.position;
+        self.reseat(id, Vec2::new(p.x, p.z));
+        self.scene.apply(Command::SetYaw { id, yaw });
+        self.transform(id)
     }
 
     /// Resolve and apply a placement for a ground-plane target, using the scaled footprint.
-    fn reseat(&mut self, target: Vec2) -> Vec<f32> {
-        let placement = resolve_placement(&self.scene, &self.scaled_asset(), target, SNAP_RADIUS);
-        self.scene.apply(Command::Reposition {
-            id: CHAIR,
-            placement,
-        });
-        self.transform()
+    fn reseat(&mut self, id: FurnishingId, target: Vec2) -> Vec<f32> {
+        let placement = resolve_placement(&self.scene, &self.scaled_asset(id), target, SNAP_RADIUS);
+        self.scene.apply(Command::Reposition { id, placement });
+        self.transform(id)
     }
 
-    /// Everything the renderer needs to draw the chair, in one coarse array:
-    /// `[x, up, z, yaw, scale_x, scale_y, scale_z, snapped]`.
-    fn transform(&self) -> Vec<f32> {
-        let f = self.furnishing();
-        vec![
-            f.placement.position.x,
-            f.placement.position.y,
-            f.placement.position.z,
-            f.placement.yaw,
-            f.scale.x,
-            f.scale.y,
-            f.scale.z,
-            matches!(f.placement.anchor, Anchor::AgainstWall(_)) as u8 as f32,
-        ]
+    /// Centre of the room footprint (origin if there is no room).
+    fn room_centre(&self) -> Vec2 {
+        let outline = &self.scene.floor_outline;
+        if outline.is_empty() {
+            Vec2::ZERO
+        } else {
+            outline.iter().copied().sum::<Vec2>() / outline.len() as f32
+        }
     }
+
+    fn transform(&self, id: FurnishingId) -> Vec<f32> {
+        transform_of(&self.furnishing(id))
+    }
+}
+
+/// Everything the renderer needs to draw one furnishing, in one coarse array:
+/// `[x, up, z, yaw, scale_x, scale_y, scale_z, snapped]`.
+fn transform_of(f: &Furnishing) -> Vec<f32> {
+    vec![
+        f.placement.position.x,
+        f.placement.position.y,
+        f.placement.position.z,
+        f.placement.yaw,
+        f.scale.x,
+        f.scale.y,
+        f.scale.z,
+        matches!(f.placement.anchor, Anchor::AgainstWall(_)) as u8 as f32,
+    ]
 }
 
 impl Default for Document {
@@ -368,18 +466,33 @@ impl Default for Document {
 mod tests {
     use super::*;
 
+    // A representative catalog extent (the sheen armchair), for tests that need one.
+    fn chair(doc: &mut Document) -> u32 {
+        doc.add_furnishing(0.83, 0.69, 0.57)
+    }
+
     #[test]
     fn undo_reverts_actions_one_at_a_time() {
         let mut doc = Document::new();
         doc.set_rectangle(4.0, 3.0);
         assert_eq!(doc.wall_count(), 4);
 
+        let id = chair(&mut doc);
         doc.rotate(1.0);
-        assert!(doc.chair_transform()[3].abs() > 0.0, "rotate should change yaw");
+        assert!(
+            doc.furnishing_transform(id)[3].abs() > 0.0,
+            "rotate should change yaw"
+        );
 
-        // Undo the rotate: yaw back to 0, room intact.
+        // Undo the rotate: yaw back to 0, furnishing + room intact.
         assert!(doc.undo());
-        assert_eq!(doc.chair_transform()[3], 0.0);
+        assert_eq!(doc.furnishing_transform(id)[3], 0.0);
+        assert_eq!(doc.furnishing_ids(), vec![id]);
+        assert_eq!(doc.wall_count(), 4);
+
+        // Undo the placement: furnishing gone, room intact.
+        assert!(doc.undo());
+        assert!(doc.furnishing_ids().is_empty());
         assert_eq!(doc.wall_count(), 4);
 
         // Undo the room creation: back to an empty scene.
@@ -388,6 +501,21 @@ mod tests {
 
         // Nothing left to undo.
         assert!(!doc.undo());
+    }
+
+    #[test]
+    fn ops_after_undoing_a_selected_furnishing_away_are_safe_no_ops() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = chair(&mut doc);
+        // Undo the placement; `selected` still points at the now-gone furnishing.
+        assert!(doc.undo());
+        assert_eq!(doc.selected_id(), id as i32);
+        // These must not panic — they should no-op to an empty transform.
+        assert!(doc.drag(1.0, 1.0).is_empty());
+        assert!(doc.rotate(1.0).is_empty());
+        assert!(doc.scale_by(1.0).is_empty());
+        assert!(doc.dimensions().is_empty());
     }
 
     #[test]
@@ -404,16 +532,36 @@ mod tests {
     fn a_drag_is_one_undo_step_via_a_single_checkpoint() {
         let mut doc = Document::new();
         doc.set_rectangle(4.0, 3.0);
-        let start = doc.chair_transform();
+        let id = chair(&mut doc);
+        let start = doc.furnishing_transform(id);
         // The web checkpoints once at the first move, then streams positions.
         doc.checkpoint();
         doc.drag(1.4, 1.0);
         doc.drag(1.2, 1.0);
         doc.drag(1.0, 1.0);
-        assert_ne!(doc.chair_transform()[0], start[0], "drag should move the chair");
+        assert_ne!(
+            doc.furnishing_transform(id)[0],
+            start[0],
+            "drag should move the furnishing"
+        );
         // One undo returns to the pre-drag position, not through each move.
         assert!(doc.undo());
-        assert_eq!(doc.chair_transform()[0], start[0]);
-        assert_eq!(doc.chair_transform()[2], start[2]);
+        assert_eq!(doc.furnishing_transform(id)[0], start[0]);
+        assert_eq!(doc.furnishing_transform(id)[2], start[2]);
+    }
+
+    #[test]
+    fn add_furnishing_hands_out_unique_ids_and_selects_the_new_one() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let a = doc.add_furnishing(0.8, 0.7, 0.6);
+        let b = doc.add_furnishing(1.0, 0.5, 1.0);
+        assert_ne!(a, b);
+        assert_eq!(doc.furnishing_ids(), vec![a, b]);
+        assert_eq!(doc.selected_id(), b as i32);
+        // Removing the selected one clears selection and drops it from the list.
+        assert!(doc.remove_selected());
+        assert_eq!(doc.furnishing_ids(), vec![a]);
+        assert_eq!(doc.selected_id(), -1);
     }
 }

@@ -32,11 +32,31 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 |---|---|
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
-| M2 — Furnishing | ⬜ |
+| M2 — Furnishing | 🚧 |
 | M3 — Look | ⬜ |
 | M4 — Capture companion (iOS) | ⬜ |
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
+
+### M2: furniture catalog — ingest, browse, place, manipulate · 2026-07-25
+
+**Accomplished**
+
+- **File-based asset pipeline.** Curated masters in `web/assets-src/` → `npm run ingest:build` normalises each (orient front→+Z, scale to real size *or* keep native, recenter origin to base-centre, meshopt-compress) → `catalog.json` (the committed metadata index) + `models/` (gitignored). Source-agnostic: the same drop-in flow will take supplied assets (ArchSense). An earlier Poly Pizza API prototype was retired — the API needed reverse-engineering and a headless browser to clear a Cloudflare challenge on its GLB CDN. **11 CC0 assets across 7 categories** — Quaternius/CreativeTrio, the Khronos SheenChair, and 5 from the Kenney Furniture Kit converted OBJ→GLB (`npm run ingest:kenney`, obj2gltf, Apache-2.0). The normaliser's recenter also **fixes the 8 mm chair-origin gap carried since PR #1**.
+- **Rust: real multi-object scene.** `Document` went from one hardcoded `CHAIR` to `add_furnishing(extent)→id` / `remove_selected` / `select` / `deselect`, with drag/rotate/scale/dimension/reset all retargeted to the selected id; new `RemoveFurnishing` command. Selection is UI state kept *off* the undo snapshots, and every op guards against an undo removing the selected furnishing out from under it. **Rule #1 held** — placement stays in Rust; JS sends intent and reads back a coarse transform per id.
+- **Viewport: multi-furnishing manager.** Loads normalised meshopt GLBs by catalog `blob` (MeshoptDecoder wired into GLTFLoader), one pickable group per id, per-object select/drag/rotate/scale, and an undo path that reconciles the mesh set (rebuilding from cached templates, so a restored furnishing reappears synchronously).
+- **Catalog UI.** Right-side floating window: broad category filter (Seating/Table/Storage/Lighting) + free-text search + lazy client-side 3D thumbnails (one reused offscreen renderer). Click places into the room (staggered so items don't stack); the selection panel (moved left) shows the item's title, live W/D/H, reset, and remove. Placements auto-stagger.
+- Verified: **24 Rust tests + clippy clean**; Playwright drove create-room → category filter → search → place several → rotate → undo with **no console errors**; screenshots reviewed (thumbnails, placement, selection highlight, panel layout).
+
+**Remains**
+
+- **Clearance / collision checking (`parry3d`) — the actual M2 value — is still absent.** Nothing checks "does it fit", walkway, or door-swing; items only *stagger* on placement and can freely overlap. This is the next real M2 step.
+- `front` is recorded as `+Z` for every asset but **unverified** — a thumbnail from an unknown camera angle can't confirm model-local front; needs a 3D preview at tag time. Related tagging trap seen twice: keying a piece on the wrong axis back-computes an absurd footprint (2.1 m round table, 2.5×3 m bed) — key on the *defining* dimension and sanity-check the derived ones.
+- Thumbnails render client-side each session (a second WebGL context), not cached to disk. Fine at this catalog size.
+- No 2D-plan view of furniture, no multi-select, no duplicate; rotate/scale undo still per-keypress (carried).
+- The sheen armchair master is the textured ~3.9 MB GLB (normalised to ~3.3 MB — meshopt compresses geometry, not its large textures); the low-poly pieces are 6–16 KB. KTX2/texture compression still unbuilt (carried).
+- dev-only probes present, now `__selectedYaw` / `__furnishingCount` / `__wallCount` / `__floorTris` / `__deleteWallById` (evolved from `__chairYaw`).
+- Carried: RoomPlan USD round-trip; fps measured on one machine only.
 
 ### Undo (Cmd/Ctrl+Z) · 2026-07-24
 
@@ -268,6 +288,12 @@ React + TypeScript + Vite. A 2D floorplan editor (SVG or canvas2d) and a 3D view
 | **Reversibility** | Easy *if* the metadata schema is right from asset #1. Retrofitting anchors and dimensions across thousands of models is miserable. |
 
 > **Flag — the long pole is content, not code.** Planner5D ships ~8,000 items; Coohom's moat is its brand catalog. Sourcing, licensing, normalizing, and tagging thousands of models is a business and ops problem that will outlast the engineering. Budget it as a parallel workstream from M2, not a task.
+
+**Sourcing decision — curated files, not a runtime warehouse and not a warehouse API.** A live in-app "3D warehouse" (Sketchfab, Trimble, Fab) is the wrong shape: warehouses ship *geometry*, but the constraint system needs the metadata above (anchor, real dims, front vector, clearance) that **none of them provide** — so a warehouse only accelerates *sourcing*, it never removes the normalize+tag workstream, which is the long pole. That insight survived a prototype: we built a full ingest against the Poly Pizza API and it worked, but the API needed reverse-engineering and its GLB CDN sits behind a Cloudflare browser challenge (a headless browser just to download). The catalog is small and curated ("not that many"), so the sourcing model is now **operator-supplied master files** — hand-picked CC0 assets now, and supplied assets (e.g. ArchSense exports) going forward. Same benefit as mirror-and-normalize, none of the warehouse coupling.
+
+> **Pipeline (built):** file-based and source-agnostic (`web/scripts/`). Drop a master in `assets-src/` (committed — irreplaceable inputs), describe provenance + geometry tags in `tags.json`, run `npm run ingest:build` → normalise (orient front→+Z, scale to real dims *or* keep native scale, recenter origin to base-centre, meshopt-compress) → `catalog.json`. The normaliser's base-centre recenter also fixes the long-standing 8 mm chair-origin gap. Seeded with 5 CC0 low-poly furniture pieces (Quaternius/CreativeTrio).
+>
+> **Storage shape:** normalised GLBs live in `models/` (gitignored, regenerated from masters); `catalog.json` is the committed metadata index (`asset_id, source, license, attribution, category, dims_m, anchor, front, clearance_m, tags, blob`). **At this scale `catalog.json` IS the database** — a real DB (SQLite → Postgres) is deferred until the catalog outgrows a file: hundreds of assets, user uploads, or server-side search. Then the object-store + relational-index split applies. **Objaverse-XL** (10M+ open GLB) remains a later ML lever for auto-orient/auto-tag at scale — a research direction, not an MVP catalog.
 
 ### 6. Cloud
 
