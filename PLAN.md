@@ -38,6 +38,16 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
 
+### Setup docs: document the ingest step · 2026-07-25
+
+**Accomplished**
+
+- Rewrote the README's **Develop** section into numbered **Spin up the app** steps. The fix that prompted it: a fresh clone was missing `npm run ingest:build`, so `catalog.json` populated the catalog UI but the normalised GLBs it points at (gitignored, regenerated from `assets-src/` masters) were never built — the catalog rendered empty. The step is now called out alongside `npm run textures` as one of the two that regenerate gitignored content, with the "skip either and the app loads, but empty" symptom named.
+
+**Remains**
+
+- Docs-only; no code or milestone-state change. All M1/M2 remains carried forward from the entry below — clearance/collision (`parry3d`) still the next real M2 step; unverified `front=+Z`; thumbnails uncached; RoomPlan USD round-trip.
+
 ### M2: furniture catalog — ingest, browse, place, manipulate · 2026-07-25
 
 **Accomplished**
