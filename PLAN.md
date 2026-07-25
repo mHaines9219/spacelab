@@ -38,6 +38,20 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
 
+### Default room opens with two walls · 2026-07-25
+
+**Accomplished**
+
+- **A generated rectangle now spawns as an open corner, not a closed box.** `set_rectangle` raises only the two far walls (meeting at the origin corner); the near two — the ones the camera looks through — are omitted, so a fresh room reads as a dollhouse view you can see into rather than the inside of a sealed box. The **floor keeps its full rectangular footprint** regardless, since the document already stored the floor outline independently of the walls. The missing walls can be added back by hand from the 3D "add wall" flow.
+- Refactored `build_room` to take an explicit list of wall segments + a floor outline (the two were already decoupled in the document). The **Draw** path is untouched — a traced polygon still raises every wall the user drew; the two-wall default is only for the generated rectangle/square.
+- Verified: **26 Rust tests + clippy clean** (updated three undo tests off the old 4-wall assumption; added `a_rectangle_opens_with_two_walls_but_a_full_floor` and `a_traced_polygon_raises_every_wall`); drove the real app — created a 12×10 room, `__wallCount` reads 2, no console errors, screenshot shows the open back corner over a complete floor.
+
+**Remains**
+
+- **Resize rebuilds as two walls too** (RoomSizePanel re-calls `set_rectangle`), so resizing wipes any walls added back by hand — same rebuild-from-scratch behaviour the 4-wall version had, now more visible.
+- Which two walls are kept is fixed to the origin corner and tuned to the default camera azimuth; if the camera orbits behind them the room reads as open from the back. No per-room control over which sides are open.
+- Carried: clearance/collision (`parry3d`) still absent; `front` axis unverified; thumbnails uncached; KTX2 unbuilt; RoomPlan USD round-trip; fps on one machine; dev-only probes (`__wallCount`, `__furnishingCount`, `__selectedYaw`, `__floorTris`, `__deleteWallById`). Doors/windows (merged in the entry below) are unaffected — openings ride their wall, so the two omitted walls simply carry no openings by default.
+
 ### M1: parametric doors & windows that snap to walls · 2026-07-25
 
 **Accomplished**

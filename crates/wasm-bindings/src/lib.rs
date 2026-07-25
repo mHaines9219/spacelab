@@ -102,14 +102,23 @@ impl Document {
     // --- Room construction -------------------------------------------------
 
     /// Replace the room with an axis-aligned rectangle, corner at the origin.
+    ///
+    /// A fresh rectangular room opens toward the camera: only the two far walls
+    /// (meeting at the origin corner) are raised, so the near two never block the
+    /// view in. The floor keeps its full rectangular footprint regardless, and the
+    /// missing walls can be added back by hand from the 3D view.
     pub fn set_rectangle(&mut self, width: f32, depth: f32) {
         self.checkpoint();
-        self.build_room(&[
+        let corners = [
             Vec2::new(0.0, 0.0),
             Vec2::new(width, 0.0),
             Vec2::new(width, depth),
             Vec2::new(0.0, depth),
-        ]);
+        ];
+        self.build_room(
+            &[(corners[3], corners[0]), (corners[0], corners[1])],
+            &corners,
+        );
     }
 
     /// Replace the room with an arbitrary closed loop. `coords` is `[x0, z0, x1, z1, …]`
@@ -118,7 +127,12 @@ impl Document {
         let points: Vec<Vec2> = coords.chunks_exact(2).map(|c| Vec2::new(c[0], c[1])).collect();
         if points.len() >= 3 {
             self.checkpoint();
-            self.build_room(&points);
+            // A traced room raises every wall the user drew — the two-wall default is
+            // only for the generated rectangle.
+            let n = points.len();
+            let segments: Vec<(Vec2, Vec2)> =
+                (0..n).map(|i| (points[i], points[(i + 1) % n])).collect();
+            self.build_room(&segments, &points);
         }
     }
 
@@ -144,20 +158,23 @@ impl Document {
         self.rebuild();
     }
 
-    fn build_room(&mut self, points: &[Vec2]) {
+    /// Rebuild the room from an explicit set of wall segments plus a floor outline.
+    /// The two are decoupled on purpose: the floor footprint is whatever `outline`
+    /// describes, independent of how many `segments` are raised, so a room can open
+    /// on one or more sides without reshaping its floor.
+    fn build_room(&mut self, segments: &[(Vec2, Vec2)], outline: &[Vec2]) {
         self.scene.apply(Command::ClearWalls);
-        let n = points.len();
-        for i in 0..n {
+        for (i, (start, end)) in segments.iter().enumerate() {
             self.scene.apply(Command::AddWall(Wall {
                 id: i as u32,
-                start: points[i],
-                end: points[(i + 1) % n],
+                start: *start,
+                end: *end,
                 thickness: WALL_THICKNESS,
                 height: WALL_HEIGHT,
             }));
         }
         // The floor footprint is stored on the document, so later wall edits leave it be.
-        self.scene.apply(Command::SetFloorOutline(points.to_vec()));
+        self.scene.apply(Command::SetFloorOutline(outline.to_vec()));
         // Furnishings persist across room edits; the web re-reads their transforms.
         self.rebuild();
     }
@@ -649,7 +666,8 @@ mod tests {
     fn undo_reverts_actions_one_at_a_time() {
         let mut doc = Document::new();
         doc.set_rectangle(4.0, 3.0);
-        assert_eq!(doc.wall_count(), 4);
+        // A generated rectangle opens toward the camera: two far walls, full floor.
+        assert_eq!(doc.wall_count(), 2);
 
         let id = chair(&mut doc);
         doc.rotate(1.0);
@@ -662,12 +680,12 @@ mod tests {
         assert!(doc.undo());
         assert_eq!(doc.furnishing_transform(id)[3], 0.0);
         assert_eq!(doc.furnishing_ids(), vec![id]);
-        assert_eq!(doc.wall_count(), 4);
+        assert_eq!(doc.wall_count(), 2);
 
         // Undo the placement: furnishing gone, room intact.
         assert!(doc.undo());
         assert!(doc.furnishing_ids().is_empty());
-        assert_eq!(doc.wall_count(), 4);
+        assert_eq!(doc.wall_count(), 2);
 
         // Undo the room creation: back to an empty scene.
         assert!(doc.undo());
@@ -693,13 +711,32 @@ mod tests {
     }
 
     #[test]
+    fn a_rectangle_opens_with_two_walls_but_a_full_floor() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        // Only the two far walls (meeting at the origin corner) are raised…
+        assert_eq!(doc.wall_count(), 2);
+        // …but the floor keeps the full 4×3 rectangular footprint.
+        assert_eq!(doc.room_bounds(), vec![0.0, 0.0, 4.0, 3.0]);
+    }
+
+    #[test]
+    fn a_traced_polygon_raises_every_wall() {
+        let mut doc = Document::new();
+        // A four-corner traced loop keeps all four walls — the two-wall default is
+        // only for the generated rectangle.
+        doc.set_polygon(&[0.0, 0.0, 4.0, 0.0, 4.0, 3.0, 0.0, 3.0]);
+        assert_eq!(doc.wall_count(), 4);
+    }
+
+    #[test]
     fn undo_restores_a_deleted_wall() {
         let mut doc = Document::new();
         doc.set_rectangle(4.0, 3.0);
         doc.delete_wall(0);
-        assert_eq!(doc.wall_count(), 3);
+        assert_eq!(doc.wall_count(), 1);
         assert!(doc.undo());
-        assert_eq!(doc.wall_count(), 4);
+        assert_eq!(doc.wall_count(), 2);
     }
 
     #[test]
@@ -745,8 +782,8 @@ mod tests {
         doc.set_rectangle(4.0, 3.0);
         let solid_verts = doc.wall_positions().len();
 
-        // Wall 0 runs along +X from the origin; a door dropped near its far end snaps in.
-        let id = doc.add_opening(0, 0, 3.6, 0.0);
+        // Wall 1 runs along +X from the origin; a door dropped near its far end snaps in.
+        let id = doc.add_opening(0, 1, 3.6, 0.0);
         assert_eq!(id, 1);
         assert_eq!(doc.selected_opening_id(), 1);
         assert_eq!(doc.opening_ids(), vec![1]);
@@ -787,7 +824,7 @@ mod tests {
     fn dragging_a_window_slides_it_along_the_wall() {
         let mut doc = Document::new();
         doc.set_rectangle(4.0, 3.0);
-        let id = doc.add_opening(1, 0, 1.0, 0.0) as u32;
+        let id = doc.add_opening(1, 1, 1.0, 0.0) as u32;
         let x0 = doc.opening_transform(id)[0];
         doc.checkpoint();
         assert!(doc.drag_opening(3.0, 0.0));
@@ -802,12 +839,12 @@ mod tests {
     fn deleting_a_wall_removes_its_openings_and_undo_restores_both() {
         let mut doc = Document::new();
         doc.set_rectangle(4.0, 3.0);
-        doc.add_opening(0, 0, 2.0, 0.0);
+        doc.add_opening(0, 1, 2.0, 0.0);
         assert_eq!(doc.opening_ids().len(), 1);
-        doc.delete_wall(0);
+        doc.delete_wall(1);
         assert!(doc.opening_ids().is_empty(), "opening should die with its wall");
         assert!(doc.undo());
-        assert_eq!(doc.wall_count(), 4);
+        assert_eq!(doc.wall_count(), 2);
         assert_eq!(doc.opening_ids().len(), 1, "undo restores the wall's opening");
     }
 
