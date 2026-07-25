@@ -50,7 +50,35 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 
 - **Resize rebuilds as two walls too** (RoomSizePanel re-calls `set_rectangle`), so resizing wipes any walls added back by hand — same rebuild-from-scratch behaviour the 4-wall version had, now more visible.
 - Which two walls are kept is fixed to the origin corner and tuned to the default camera azimuth; if the camera orbits behind them the room reads as open from the back. No per-room control over which sides are open.
-- Carried: clearance/collision (`parry3d`) still absent; `front` axis unverified; thumbnails uncached; KTX2 unbuilt; RoomPlan USD round-trip; fps on one machine; dev-only probes (`__wallCount`, `__furnishingCount`, `__selectedYaw`, `__floorTris`, `__deleteWallById`).
+- Carried: clearance/collision (`parry3d`) still absent; `front` axis unverified; thumbnails uncached; KTX2 unbuilt; RoomPlan USD round-trip; fps on one machine; dev-only probes (`__wallCount`, `__furnishingCount`, `__selectedYaw`, `__floorTris`, `__deleteWallById`). Doors/windows (merged in the entry below) are unaffected — openings ride their wall, so the two omitted walls simply carry no openings by default.
+
+### M1: parametric doors & windows that snap to walls · 2026-07-25
+
+**Accomplished**
+
+- **Openings are real document objects, owned by a wall.** New `Opening { wall, kind, along, width, height, sill }` + `OpeningKind::{Door, Window}` in `core-scene`, stored on the `Scene` in a flat list keyed by `wall` id — position is a distance *along the wall centreline*, never world coordinates, so the opening rides with its wall. New commands `AddOpening`/`RemoveOpening`/`MoveOpening`/`ResizeOpening` all flow through the same `Scene::apply` funnel, so **undo works for free** via the existing snapshot stack. Deleting a wall (or `ClearWalls`) cascades its openings away in the same retain. **Rule #1 held** — every bit of placement/geometry math is in Rust; JS sends intent and reads back coarse arrays.
+- **The wall mesh is cut, not faked.** `wall_mesh` now takes the wall's openings and partitions each long face into solid strips (before / below / above / after each opening), leaving the hole, then lines it with sill/head/jamb **reveals** through the wall thickness so you see real depth looking through. A floor-standing door omits the sill strip and reveal; a window keeps them. `seat_opening` clamps the centre so the whole opening stays within the wall (wider-than-wall centres instead of inverting).
+- **Snap-to-wall placement + direct manipulation.** "add door" / "add window" arm a placement mode; the next wall click drops the opening snapped to that point (the pointer handler raycasts the existing invisible wall-pick boxes, hands the world point to Rust, which projects + clamps). A placed opening is selectable (invisible per-opening pick box + blue selection outline, both positioned purely from a Rust transform, exactly like furnishings), **drag-slides along its wall**, edits width/height (+ sill for windows) by typed inches in a side panel, and deletes. Windows also get a translucent glass pane drawn by JS from the same Rust transform.
+- Verified: **39 Rust tests + clippy clean** (new scene/geometry/binding tests: hole leaves no geometry in the doorway, door adds head+2 jambs but no sill, window adds the sill reveal, reveal normals face the void, seat clamping, wall-delete cascade, drag+undo). Playwright drove create-room → place door (wall cut confirmed by triangle-count change) → place window → add-mode banner + Esc → undo both → walls intact, **13/13 checks, no console errors**; screenshot reviewed (doorway to floor with visible reveals, windowed opening with sill + glass).
+
+**Remains**
+
+- **No clearance/collision checking** — an opening can overlap furniture, and two openings whose spans overlap *along one wall* produce undefined face geometry (the sweep assumes non-overlapping spans; nothing rejects it yet). Same `parry3d` gap flagged for M2 furniture.
+- Openings only snap to a wall's **centreline projection**; there's no along-wall dimension readout, no grid/snap-to-centre, and no 2D-plan representation of them.
+- Height/sill clamp to the wall height but there's **no per-opening validation UI** (e.g. a sill dragged near the ceiling just yields a sliver). Door leaf/swing, window frame mullions, and casing/trim are all unbuilt — a door is a framed *doorway*, a window is a *glass pane*, nothing opens.
+- Dragging an opening **rebuilds the whole wall mesh per pointer move** (fine at this scale; a bigger model would want a targeted re-emit). New dev probes `__openingCount` / `__wallTris` / `__addOpeningOnWall`.
+- WASM grew to **~34 KB gzipped** (was ~23) with the opening geometry + binding surface — still far under the 250 KB budget.
+- Carried from M2 and earlier: clearance/collision (`parry3d`) still the headline M2 gap; `front`-vector unverified; thumbnails un-cached; KTX2/texture compression unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan USD round-trip; fps on one machine only. **Still open within M1: mitred wall junctions and room detection from the wall graph** (doors/windows now off that list).
+
+### Setup docs: document the ingest step · 2026-07-25
+
+**Accomplished**
+
+- Rewrote the README's **Develop** section into numbered **Spin up the app** steps. The fix that prompted it: a fresh clone was missing `npm run ingest:build`, so `catalog.json` populated the catalog UI but the normalised GLBs it points at (gitignored, regenerated from `assets-src/` masters) were never built — the catalog rendered empty. The step is now called out alongside `npm run textures` as one of the two that regenerate gitignored content, with the "skip either and the app loads, but empty" symptom named.
+
+**Remains**
+
+- Docs-only; no code or milestone-state change. All M1/M2 remains carried forward from the entry below — clearance/collision (`parry3d`) still the next real M2 step; unverified `front=+Z`; thumbnails uncached; RoomPlan USD round-trip.
 
 ### M2: furniture catalog — ingest, browse, place, manipulate · 2026-07-25
 

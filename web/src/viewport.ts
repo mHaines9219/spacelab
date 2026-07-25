@@ -82,6 +82,14 @@ export type CatalogEntry = {
  */
 export type Selection = { title: string; dims: [number, number, number] } | null;
 
+/**
+ * The selected opening's kind and size in inches `[width, height, sill]`, or null when no
+ * opening is selected. Doors ignore the sill field.
+ */
+export type OpeningSelection =
+  | { kind: "door" | "window"; dims: [number, number, number] }
+  | null;
+
 export type ViewportHandle = {
   dispose: () => void;
   /** Place a catalog asset in the room and select it. */
@@ -108,6 +116,12 @@ export type ViewportHandle = {
   startAddWall: () => void;
   /** Delete the currently selected wall, if any. */
   deleteSelectedWall: () => void;
+  /** Enter add-opening mode: the next wall click drops a snapped door or window. */
+  startAddOpening: (kind: "door" | "window") => void;
+  /** Remove the selected door/window, if any. */
+  removeSelectedOpening: () => void;
+  /** Set one opening dimension in inches: axis 0 = width, 1 = height, 2 = sill. */
+  setOpeningDimension: (axis: number, inches: number) => void;
   /**
    * Undo the last action, re-syncing the whole scene. Returns derived UI state to
    * refresh (floor finish, room footprint), or null if there was nothing to undo.
@@ -131,6 +145,8 @@ export async function createViewport(
   onSelection: (selection: Selection) => void,
   onWall: (wallId: number | null) => void,
   onAddMode: (active: boolean) => void,
+  onOpening: (selection: OpeningSelection) => void,
+  onOpeningMode: (kind: "door" | "window" | null) => void,
 ): Promise<ViewportHandle> {
   await init();
   const doc = new Document();
@@ -243,6 +259,100 @@ export async function createViewport(
         child.userData.wallId === id ? 0.32 : 0;
     }
     onWall(id);
+  };
+
+  // --- Openings (doors & windows) -----------------------------------------
+  // Rust cuts the hole into the wall mesh itself; JS only draws, per opening, an
+  // invisible pick box (so the hole is selectable), a selection outline, and — for a
+  // window — a glass pane. All three are positioned entirely from the Rust transform,
+  // exactly as furnishings are, so no geometry logic crosses the boundary.
+  const openingGroup = new THREE.Group();
+  scene.add(openingGroup);
+  const openingOutlineMat = new THREE.LineBasicMaterial({ color: 0x5b9dff });
+  const openingPickMat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0xbcd6ef,
+    roughness: 0.08,
+    metalness: 0,
+    transmission: 0.7,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  type Opening3D = {
+    id: number;
+    pick: THREE.Mesh;
+    outline: THREE.LineSegments;
+    glass?: THREE.Mesh;
+  };
+  let openings: Opening3D[] = [];
+  let selectedOpening: number | null = null;
+
+  const disposeOpening = (o: Opening3D) => {
+    for (const part of [o.pick, o.outline, o.glass]) {
+      if (!part) continue;
+      openingGroup.remove(part);
+      (part as THREE.Mesh).geometry.dispose();
+    }
+  };
+
+  // Rebuild every opening proxy from the document. Cheap at this count, and called after
+  // any add/move/resize/undo since the wall mesh (and thus each hole) changes underneath.
+  const rebuildOpenings = () => {
+    for (const o of openings) disposeOpening(o);
+    openings = [];
+    for (const id of doc.opening_ids()) {
+      const t = doc.opening_transform(id);
+      if (t.length < 8) continue;
+      const [cx, cy, cz, yaw, w, h, thick, kind] = t;
+      const place = (obj: THREE.Object3D) => {
+        obj.position.set(cx, cy, cz);
+        obj.rotation.y = yaw;
+      };
+      const pick = new THREE.Mesh(new THREE.BoxGeometry(w, h, thick + 0.08), openingPickMat);
+      place(pick);
+      pick.userData.openingId = id;
+      openingGroup.add(pick);
+
+      const outline = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, thick)),
+        openingOutlineMat,
+      );
+      place(outline);
+      outline.visible = id === selectedOpening;
+      openingGroup.add(outline);
+
+      let glass: THREE.Mesh | undefined;
+      if (kind === 1) {
+        glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), glassMat);
+        place(glass);
+        openingGroup.add(glass);
+      }
+      openings.push({ id, pick, outline, glass });
+    }
+  };
+
+  const openingSelectionPayload = (): OpeningSelection => {
+    if (selectedOpening === null) return null;
+    const t = doc.opening_transform(selectedOpening);
+    if (t.length < 8) return null;
+    return {
+      kind: t[7] === 1 ? "window" : "door",
+      dims: [...doc.opening_dimensions()] as [number, number, number],
+    };
+  };
+
+  const selectOpening = (id: number | null) => {
+    selectedOpening = id;
+    if (id === null) doc.deselect_opening();
+    else doc.select_opening(id);
+    for (const o of openings) o.outline.visible = o.id === id;
+    onOpening(openingSelectionPayload());
   };
 
   // --- Furnishings ---------------------------------------------------------
@@ -393,6 +503,7 @@ export async function createViewport(
   const pointer = new THREE.Vector2();
   const hit = new THREE.Vector3();
   let dragging = false;
+  let draggingOpening = false; // sliding a selected opening along its wall
   let dragMoved = false; // becomes true on the first move, when we take one undo checkpoint
 
   const aimAt = (event: PointerEvent) => {
@@ -414,6 +525,24 @@ export async function createViewport(
   canvas.addEventListener("pointerdown", (event) => {
     aimAt(event);
 
+    // Add-opening mode: one wall click drops a snapped door or window.
+    if (openingMode) {
+      const wallHit = raycaster.intersectObjects(wallPicks.children, false)[0];
+      if (wallHit) {
+        const wallId = wallHit.object.userData.wallId as number;
+        const id = doc.add_opening(openingMode === "door" ? 0 : 1, wallId, wallHit.point.x, wallHit.point.z);
+        syncRoomGeometry();
+        rebuildOpenings();
+        if (id >= 0) {
+          selectFurnishing(null);
+          selectWall(null);
+          selectOpening(id);
+        }
+        setAddOpening(null);
+      }
+      return;
+    }
+
     // Add-wall mode: two floor clicks define a wall.
     if (addMode) {
       if (!raycaster.ray.intersectPlane(floorPlane, hit)) return;
@@ -428,13 +557,14 @@ export async function createViewport(
       return;
     }
 
-    // Furnishings take priority, then walls, then empty space.
+    // Furnishings take priority, then openings, then walls, then empty space.
     const groups = [...furnishings.values()].map((f) => f.group);
     const furnishingHit = groups.length ? raycaster.intersectObjects(groups, true)[0] : undefined;
     if (furnishingHit) {
       const id = furnishingIdAt(furnishingHit.object);
       if (id !== null) {
         selectWall(null);
+        selectOpening(null);
         selectFurnishing(id);
         dragging = true;
         dragMoved = false;
@@ -443,13 +573,28 @@ export async function createViewport(
         return;
       }
     }
+    const openingHit = openings.length
+      ? raycaster.intersectObjects(openings.map((o) => o.pick), false)[0]
+      : undefined;
+    if (openingHit) {
+      selectFurnishing(null);
+      selectWall(null);
+      selectOpening(openingHit.object.userData.openingId as number);
+      draggingOpening = true;
+      dragMoved = false;
+      controls.enabled = false;
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
     const wallHit = raycaster.intersectObjects(wallPicks.children, false)[0];
     if (wallHit) {
       selectFurnishing(null);
+      selectOpening(null);
       selectWall(wallHit.object.userData.wallId as number);
       return;
     }
     selectFurnishing(null);
+    selectOpening(null);
     selectWall(null);
   });
 
@@ -466,15 +611,21 @@ export async function createViewport(
 
   const onKey = (event: KeyboardEvent) => {
     if (document.activeElement instanceof HTMLInputElement) return;
-    // Wall editing works whether or not a furnishing is selected.
-    if (event.key === "Escape" && addMode) {
+    // Wall/opening editing works whether or not a furnishing is selected.
+    if (event.key === "Escape" && (addMode || openingMode)) {
       setAddMode(false);
+      setAddOpening(null);
       return;
     }
     if (event.key === "Delete" || event.key === "Backspace") {
-      // A selected furnishing takes the delete; otherwise a selected wall does.
+      // A selected furnishing takes the delete, then an opening, then a wall.
       if (selectedId !== null) {
         removeSelected();
+        event.preventDefault();
+        return;
+      }
+      if (selectedOpening !== null) {
+        removeSelectedOpening();
         event.preventDefault();
         return;
       }
@@ -520,21 +671,27 @@ export async function createViewport(
   };
 
   canvas.addEventListener("pointermove", (event) => {
-    if (!dragging) return;
+    if (!dragging && !draggingOpening) return;
     aimAt(event);
-    if (raycaster.ray.intersectPlane(floorPlane, hit)) {
-      // One checkpoint per drag gesture, taken before the first actual move.
-      if (!dragMoved) {
-        doc.checkpoint();
-        dragMoved = true;
-      }
+    if (!raycaster.ray.intersectPlane(floorPlane, hit)) return;
+    // One checkpoint per drag gesture, taken before the first actual move.
+    if (!dragMoved) {
+      doc.checkpoint();
+      dragMoved = true;
+    }
+    if (dragging) {
       place(hit.x, hit.z);
+    } else if (doc.drag_opening(hit.x, hit.z)) {
+      // The opening moved within the wall mesh: re-upload it and re-place the proxies.
+      syncRoomGeometry();
+      rebuildOpenings();
     }
   });
 
   const endDrag = (event: PointerEvent) => {
-    if (!dragging) return;
+    if (!dragging && !draggingOpening) return;
     dragging = false;
+    draggingOpening = false;
     controls.enabled = true;
     canvas.releasePointerCapture(event.pointerId);
   };
@@ -577,6 +734,9 @@ export async function createViewport(
     syncRoomGeometry();
     rebuildWallPicks();
     selectWall(null);
+    // A room regen clears the walls (and cascades their openings away); resync proxies.
+    rebuildOpenings();
+    selectOpening(null);
     for (const id of doc.furnishing_ids()) applyTransformFor(id, doc.furnishing_transform(id));
     frameCamera();
   };
@@ -587,8 +747,33 @@ export async function createViewport(
   const setAddMode = (on: boolean) => {
     addMode = on;
     addAnchor = null;
+    if (on) setAddOpening(null); // the two placement modes are mutually exclusive
     canvas.style.cursor = on ? "crosshair" : "";
     onAddMode(on);
+  };
+
+  // Add-opening mode: "door" | "window" while arming a placement, else null.
+  let openingMode: "door" | "window" | null = null;
+  const setAddOpening = (kind: "door" | "window" | null) => {
+    openingMode = kind;
+    if (kind) setAddMode(false);
+    canvas.style.cursor = kind ? "crosshair" : "";
+    onOpeningMode(kind);
+  };
+
+  const removeSelectedOpening = () => {
+    if (selectedOpening === null) return;
+    if (!doc.remove_selected_opening()) return;
+    syncRoomGeometry();
+    rebuildOpenings();
+    selectOpening(null);
+  };
+
+  // Reconcile opening proxies with the document after an undo (which can add, remove, or
+  // move any of them). The wall mesh was already re-synced by the undo path.
+  const reconcileOpenings = () => {
+    rebuildOpenings();
+    selectOpening(null);
   };
 
   const resize = new ResizeObserver(() => {
@@ -643,6 +828,9 @@ export async function createViewport(
       __wallCount?: () => number;
       __floorTris?: () => number;
       __deleteWallById?: (id: number) => void;
+      __openingCount?: () => number;
+      __wallTris?: () => number;
+      __addOpeningOnWall?: (kind: "door" | "window", wallId: number) => number;
     };
     probe.__selectedYaw = () =>
       selectedId !== null ? (furnishings.get(selectedId)?.group.rotation.y ?? null) : null;
@@ -654,12 +842,37 @@ export async function createViewport(
       syncRoomGeometry();
       rebuildWallPicks();
     };
+    probe.__openingCount = () => openings.length;
+    probe.__wallTris = () => (wallMesh.geometry.index?.count ?? 0) / 3;
+    // Drive a placement at the wall's midpoint, exercising the same snap + rebuild path
+    // the pointer handler uses, without having to hit a wall pixel from screen space.
+    probe.__addOpeningOnWall = (kind, wallId) => {
+      const segs = doc.wall_segments();
+      const ids = doc.wall_ids();
+      const i = ids.indexOf(wallId);
+      if (i < 0) return -1;
+      const mx = (segs[i * 4] + segs[i * 4 + 2]) / 2;
+      const mz = (segs[i * 4 + 1] + segs[i * 4 + 3]) / 2;
+      const id = doc.add_opening(kind === "door" ? 0 : 1, wallId, mx, mz);
+      syncRoomGeometry();
+      rebuildOpenings();
+      if (id >= 0) selectOpening(id);
+      return id;
+    };
   }
 
   const resetScale = () => {
     if (selectedId === null) return;
     applyTransformFor(selectedId, doc.reset_scale());
     refreshSelection();
+  };
+
+  const setOpeningDimension = (axis: number, inches: number) => {
+    if (selectedOpening === null) return;
+    if (!doc.set_opening_dimension(axis, inches)) return;
+    syncRoomGeometry();
+    rebuildOpenings();
+    onOpening(openingSelectionPayload());
   };
 
   // The choice lives in the Rust document; JS just binds the matching material.
@@ -697,9 +910,18 @@ export async function createViewport(
     startAddWall: () => {
       selectFurnishing(null);
       selectWall(null);
+      selectOpening(null);
       setAddMode(true);
     },
     deleteSelectedWall,
+    startAddOpening: (kind) => {
+      selectFurnishing(null);
+      selectWall(null);
+      selectOpening(null);
+      setAddOpening(kind);
+    },
+    removeSelectedOpening,
+    setOpeningDimension,
     undo: () => {
       if (!doc.undo()) return null;
       // Undo can touch anything, so re-sync the whole scene from the restored document.
@@ -707,8 +929,10 @@ export async function createViewport(
       rebuildWallPicks();
       selectWall(null);
       if (addMode) setAddMode(false);
+      if (openingMode) setAddOpening(null);
       floorMesh.material = floorMaterials[doc.floor_material()];
       reconcileFurnishings();
+      reconcileOpenings();
       selectFurnishing(null);
       const hasRoom = doc.has_room();
       const [minX, minZ, maxX, maxZ] = doc.room_bounds();

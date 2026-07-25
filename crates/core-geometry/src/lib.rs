@@ -1,7 +1,11 @@
 //! Turns the scene document into meshes: prismatic wall extrusion, triangulation, snapping and clearance queries.
 
-use core_scene::{Anchor, Asset, Placement, Scene, Wall};
+use core_scene::{Anchor, Asset, Opening, Placement, Scene, Wall};
 use glam::{Vec2, Vec3};
+
+/// Spans thinner than this (metres) are dropped rather than emitted as slivers — e.g.
+/// the below-opening strip of a floor-standing door, whose sill is 0.
+const EPS: f32 = 1e-4;
 
 #[derive(Clone, Debug, Default)]
 pub struct MeshBuffers {
@@ -46,7 +50,18 @@ fn ground(p: Vec2, up: f32) -> Vec3 {
     Vec3::new(p.x, up, p.y)
 }
 
-pub fn wall_mesh(wall: &Wall, out: &mut MeshBuffers) {
+/// The horizontal span an opening actually cuts, clamped inside the wall `[0, len]`.
+/// Returns `None` for openings that fall entirely outside the wall or have collapsed to
+/// nothing after clamping.
+fn cut_span(wall: &Wall, opening: &Opening) -> Option<(f32, f32)> {
+    let len = wall.length();
+    let (a0, a1) = opening.span();
+    let a0 = a0.max(0.0);
+    let a1 = a1.min(len);
+    (a1 - a0 > EPS).then_some((a0, a1))
+}
+
+pub fn wall_mesh(wall: &Wall, openings: &[Opening], out: &mut MeshBuffers) {
     let offset = wall.normal() * wall.thickness * 0.5;
     let footprint = [
         wall.start - offset,
@@ -57,12 +72,91 @@ pub fn wall_mesh(wall: &Wall, out: &mut MeshBuffers) {
     let low = footprint.map(|p| ground(p, 0.0));
     let high = footprint.map(|p| ground(p, wall.height));
 
+    // Cap and end-cap faces are unaffected by openings (which never reach the wall ends
+    // or its full height): bottom, top, and the two end caps stay solid.
     out.quad(low[0], low[1], low[2], low[3]);
     out.quad(high[3], high[2], high[1], high[0]);
-    out.quad(low[0], high[0], high[1], low[1]);
-    out.quad(low[2], high[2], high[3], low[3]);
     out.quad(low[3], high[3], high[0], low[0]);
     out.quad(low[1], high[1], high[2], low[2]);
+
+    // The two long faces (inner/outer) get partitioned around the openings; the reveals
+    // line the resulting holes through the wall's thickness.
+    let cuts: Vec<(f32, f32, &Opening)> = {
+        let mut v: Vec<(f32, f32, &Opening)> = openings
+            .iter()
+            .filter_map(|o| cut_span(wall, o).map(|(a0, a1)| (a0, a1, o)))
+            .collect();
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        v
+    };
+    emit_face(wall, -1.0, &cuts, out);
+    emit_face(wall, 1.0, &cuts, out);
+    for &(a0, a1, o) in &cuts {
+        emit_reveals(wall, a0, a1, o, out);
+    }
+}
+
+/// A point on one long face of the wall at distance `a` along the centreline, height `y`,
+/// and thickness side `s` (`-1` inner offset, `+1` outer offset).
+fn face_point(wall: &Wall, a: f32, y: f32, s: f32) -> Vec3 {
+    let d = wall.direction();
+    let n = wall.normal();
+    ground(wall.start + d * a + n * (wall.thickness * 0.5 * s), y)
+}
+
+/// Emit one long face (side `s`) as solid strips between and above/below each opening,
+/// leaving the openings as holes. Winding flips with the side so both faces point out.
+fn emit_face(wall: &Wall, s: f32, cuts: &[(f32, f32, &Opening)], out: &mut MeshBuffers) {
+    let len = wall.length();
+    let height = wall.height;
+    let quad = |out: &mut MeshBuffers, a0: f32, a1: f32, y0: f32, y1: f32| {
+        if a1 - a0 <= EPS || y1 - y0 <= EPS {
+            return;
+        }
+        let p = |a, y| face_point(wall, a, y, s);
+        if s < 0.0 {
+            out.quad(p(a0, y0), p(a0, y1), p(a1, y1), p(a1, y0));
+        } else {
+            out.quad(p(a1, y0), p(a1, y1), p(a0, y1), p(a0, y0));
+        }
+    };
+
+    let mut cursor = 0.0;
+    for &(a0, a1, o) in cuts {
+        let (sill, head) = (o.sill.max(0.0), o.head().min(height));
+        quad(out, cursor, a0, 0.0, height); // full-height wall before the opening
+        quad(out, a0, a1, 0.0, sill); // strip below the sill (empty for a door)
+        quad(out, a0, a1, head, height); // strip above the head
+        cursor = a1;
+    }
+    quad(out, cursor, len, 0.0, height); // wall after the last opening
+}
+
+/// Line the hole through the wall's thickness: sill, head, and the two jambs. Each reveal
+/// faces into the void so it reads when you look through the opening.
+fn emit_reveals(wall: &Wall, a0: f32, a1: f32, o: &Opening, out: &mut MeshBuffers) {
+    let (sill, head) = (o.sill.max(0.0), o.head().min(wall.height));
+    if head - sill <= EPS {
+        return;
+    }
+    let p = |a, y, s| face_point(wall, a, y, s);
+
+    // Sill (skipped for a floor-standing door) faces up; head faces down.
+    if sill > EPS {
+        out.quad(p(a0, sill, -1.0), p(a0, sill, 1.0), p(a1, sill, 1.0), p(a1, sill, -1.0));
+    }
+    out.quad(p(a0, head, -1.0), p(a1, head, -1.0), p(a1, head, 1.0), p(a0, head, 1.0));
+    // Jambs at each end, normals pointing inward along the wall.
+    out.quad(p(a0, sill, -1.0), p(a0, head, -1.0), p(a0, head, 1.0), p(a0, sill, 1.0));
+    out.quad(p(a1, sill, -1.0), p(a1, sill, 1.0), p(a1, head, 1.0), p(a1, head, -1.0));
+}
+
+/// Clamp a desired centre position so an opening of `width` sits wholly within the wall.
+/// Wider-than-wall openings centre on the wall instead of inverting the clamp.
+pub fn seat_opening(wall: &Wall, cursor: Vec2, width: f32) -> f32 {
+    let len = wall.length();
+    let half = (width * 0.5).min(len * 0.5);
+    wall.project(cursor).clamp(half, len - half)
 }
 
 /// The floor is the document's designated footprint — independent of the walls, so
@@ -157,7 +251,8 @@ pub fn shell_mesh(scene: &Scene) -> MeshBuffers {
     let mut out = MeshBuffers::default();
     floor_mesh(scene, &mut out);
     for wall in &scene.walls {
-        wall_mesh(wall, &mut out);
+        let openings: Vec<Opening> = scene.openings_on(wall.id).copied().collect();
+        wall_mesh(wall, &openings, &mut out);
     }
     out
 }
@@ -199,7 +294,7 @@ pub fn resolve_placement(scene: &Scene, asset: &Asset, cursor: Vec2, radius: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_scene::Command;
+    use core_scene::{Command, OpeningKind, WallId};
 
     const CHAIR: Asset = Asset {
         extent: Vec3::new(0.83, 0.69, 0.57),
@@ -247,16 +342,124 @@ mod tests {
     #[test]
     fn wall_extrudes_to_a_closed_box() {
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&corner_room().walls[0], &mut mesh);
+        wall_mesh(&corner_room().walls[0], &[], &mut mesh);
         assert_eq!(mesh.vertex_count(), 24);
         assert_eq!(mesh.triangle_count(), 12);
+    }
+
+    fn opening(wall: WallId, kind: OpeningKind, along: f32, sill: f32) -> Opening {
+        Opening {
+            id: 100,
+            wall,
+            kind,
+            along,
+            width: 0.9,
+            height: 1.2,
+            sill,
+        }
+    }
+
+    /// Every quad in a mesh, as its four corner points (verts are grouped in fours).
+    fn quads(mesh: &MeshBuffers) -> Vec<[Vec3; 4]> {
+        (0..mesh.vertex_count() / 4)
+            .map(|q| {
+                std::array::from_fn(|i| {
+                    let v = (q * 4 + i) * 3;
+                    Vec3::from_slice(&mesh.positions[v..v + 3])
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_door_leaves_no_geometry_over_its_opening() {
+        // A door reaching the floor: no quad should occupy the doorway void.
+        let wall = corner_room().walls[0]; // along +X, 4.2 long
+        let door = opening(0, OpeningKind::Door, 2.1, 0.0);
+        let mut mesh = MeshBuffers::default();
+        wall_mesh(&wall, &[door], &mut mesh);
+        let (a0, a1) = door.span();
+        for q in quads(&mesh) {
+            let c = q.iter().copied().sum::<Vec3>() / 4.0;
+            // A face quad is one lying on a long face (|z| = half-thickness). If its
+            // centroid sits inside the doorway footprint and below the head, it's a leak.
+            let on_face = (c.z.abs() - 0.06).abs() < 1e-3;
+            let inside = c.x > a0 + 1e-3 && c.x < a1 - 1e-3 && c.y < door.head() - 1e-3;
+            assert!(!(on_face && inside), "face quad {c} sits inside the doorway");
+        }
+    }
+
+    #[test]
+    fn a_door_adds_a_head_and_two_jambs_but_no_sill() {
+        // Solid wall = 6 quads. A floor door splits each long face into (before, above,
+        // after) = 3, so 2 caps + 2 ends + 6 face strips = 10, plus head + 2 jambs = 13.
+        let wall = corner_room().walls[0];
+        let mut mesh = MeshBuffers::default();
+        wall_mesh(&wall, &[opening(0, OpeningKind::Door, 2.1, 0.0)], &mut mesh);
+        assert_eq!(mesh.vertex_count() / 4, 13);
+    }
+
+    #[test]
+    fn a_window_adds_a_sill_reveal_that_a_door_omits() {
+        // A window has a strip below it on each face (+2 vs the door) and a sill reveal
+        // (+1): 13 + 3 = 16 quads.
+        let wall = corner_room().walls[0];
+        let mut mesh = MeshBuffers::default();
+        wall_mesh(&wall, &[opening(0, OpeningKind::Window, 2.1, 0.9)], &mut mesh);
+        assert_eq!(mesh.vertex_count() / 4, 16);
+    }
+
+    #[test]
+    fn reveal_normals_face_into_the_opening_void() {
+        let wall = corner_room().walls[0];
+        let win = opening(0, OpeningKind::Window, 2.1, 0.9);
+        let mut mesh = MeshBuffers::default();
+        wall_mesh(&wall, &[win], &mut mesh);
+        // The opening's centre point on the wall centreline; reveal normals should point
+        // roughly towards it (sill up, head down, jambs inward).
+        let centre = Vec3::new(win.along, win.sill + win.height * 0.5, 0.0);
+        for (c, n) in face_normals(&mesh) {
+            let near_void = (c.x - win.along).abs() < 0.46
+                && c.y > win.sill - 1e-3
+                && c.y < win.head() + 1e-3
+                && c.z.abs() < 0.05; // reveals live within the thickness, not on the faces
+            if near_void {
+                assert!((centre - c).dot(n) > 0.0, "reveal normal {n} at {c} faces away from the void");
+            }
+        }
+    }
+
+    #[test]
+    fn an_opening_wider_than_its_wall_is_centred_not_inverted() {
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(Wall {
+            id: 0,
+            start: Vec2::ZERO,
+            end: Vec2::new(0.6, 0.0),
+            thickness: 0.12,
+            height: 2.5,
+        }));
+        // Cursor past the far end; a 0.9-wide opening can't fit a 0.6 wall, so it centres.
+        let along = seat_opening(&scene.walls[0], Vec2::new(5.0, 0.0), 0.9);
+        assert!((along - 0.3).abs() < 1e-5, "along {along}");
+    }
+
+    #[test]
+    fn seat_opening_keeps_the_opening_within_the_wall() {
+        let wall = corner_room().walls[0]; // 4.2 long, 0.9-wide opening
+        // Cursor beyond the end clamps so the opening's far edge lands on the wall end.
+        let along = seat_opening(&wall, Vec2::new(9.9, 0.0), 0.9);
+        assert!((along - (4.2 - 0.45)).abs() < 1e-5, "along {along}");
+        // Cursor before the start clamps to the near margin.
+        let along = seat_opening(&wall, Vec2::new(-9.9, 0.0), 0.9);
+        assert!((along - 0.45).abs() < 1e-5, "along {along}");
     }
 
     #[test]
     fn wall_face_normals_point_away_from_the_centre() {
         for wall in corner_room().walls {
             let mut mesh = MeshBuffers::default();
-            wall_mesh(&wall, &mut mesh);
+            wall_mesh(&wall, &[], &mut mesh);
             let centre = Vec3::new(
                 (wall.start.x + wall.end.x) * 0.5,
                 wall.height * 0.5,
@@ -276,7 +479,7 @@ mod tests {
     fn wall_spans_its_thickness_and_height() {
         let wall = corner_room().walls[0];
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&wall, &mut mesh);
+        wall_mesh(&wall, &[], &mut mesh);
         let zs: Vec<f32> = mesh.positions.chunks(3).map(|v| v[2]).collect();
         let ys: Vec<f32> = mesh.positions.chunks(3).map(|v| v[1]).collect();
         assert!((zs.iter().cloned().fold(f32::MIN, f32::max) - 0.06).abs() < 1e-5);

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createViewport,
   type CatalogEntry,
+  type OpeningSelection,
   type Selection,
   type Stats,
   type ViewportHandle,
@@ -35,12 +36,22 @@ export function App() {
   const [selection, setSelection] = useState<Selection>(null);
   const [wallSel, setWallSel] = useState<number | null>(null);
   const [addMode, setAddMode] = useState(false);
+  const [openingSel, setOpeningSel] = useState<OpeningSelection>(null);
+  const [openingMode, setOpeningMode] = useState<"door" | "window" | null>(null);
   const [floor, setFloor] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
-    createViewport(canvas, setStats, setSelection, setWallSel, setAddMode).then(
+    createViewport(
+      canvas,
+      setStats,
+      setSelection,
+      setWallSel,
+      setAddMode,
+      setOpeningSel,
+      setOpeningMode,
+    ).then(
       (handle) => (handleRef.current = handle),
       (cause) => setError(String(cause)),
     );
@@ -133,6 +144,20 @@ export function App() {
             >
               add wall
             </button>
+            <button
+              type="button"
+              className="reset"
+              onClick={() => handleRef.current?.startAddOpening("door")}
+            >
+              add door
+            </button>
+            <button
+              type="button"
+              className="reset"
+              onClick={() => handleRef.current?.startAddOpening("window")}
+            >
+              add window
+            </button>
             <span className="hint">
               click a wall or furniture to select
             </span>
@@ -141,6 +166,12 @@ export function App() {
           {addMode && (
             <div className="banner">
               click two points to place a wall · Esc to cancel
+            </div>
+          )}
+
+          {openingMode && (
+            <div className="banner">
+              click a wall to place the {openingMode} · Esc to cancel
             </div>
           )}
 
@@ -177,6 +208,17 @@ export function App() {
               }
               onReset={() => handleRef.current?.resetScale()}
               onRemove={() => handleRef.current?.removeSelected()}
+            />
+          )}
+
+          {openingSel && (
+            <OpeningPanel
+              kind={openingSel.kind}
+              dims={openingSel.dims}
+              onSetDimension={(axis, inches) =>
+                handleRef.current?.setOpeningDimension(axis, inches)
+              }
+              onRemove={() => handleRef.current?.removeSelectedOpening()}
             />
           )}
 
@@ -400,6 +442,42 @@ function SelectionPanel({
         <button type="button" className="reset" onClick={onReset}>
           reset size
         </button>
+        <button type="button" className="reset danger" onClick={onRemove}>
+          remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// A door exposes width + height; a window adds a sill (floor-to-opening) height.
+const OPENING_AXES = ["width", "height", "sill"] as const;
+
+function OpeningPanel({
+  kind,
+  dims,
+  onSetDimension,
+  onRemove,
+}: {
+  kind: "door" | "window";
+  dims: [number, number, number];
+  onSetDimension: (axis: number, inches: number) => void;
+  onRemove: () => void;
+}) {
+  const axisCount = kind === "window" ? 3 : 2; // doors sit on the floor: no sill
+  return (
+    <div className="panel">
+      <strong>{kind}</strong>
+      <span className="hint">drag along the wall · type for exact size · Del remove</span>
+      {OPENING_AXES.slice(0, axisCount).map((axis, i) => (
+        <DimensionField
+          key={axis}
+          label={axis}
+          inches={dims[i]}
+          onCommit={(inches) => onSetDimension(i, inches)}
+        />
+      ))}
+      <div className="panel-actions">
         <button type="button" className="reset danger" onClick={onRemove}>
           remove
         </button>

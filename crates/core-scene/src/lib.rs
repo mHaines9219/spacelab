@@ -4,6 +4,7 @@ use glam::{Vec2, Vec3};
 
 pub type WallId = u32;
 pub type FurnishingId = u32;
+pub type OpeningId = u32;
 
 /// Ground-plane coordinates are metres as `Vec2(x, z)`; `Vec3` is `(x, up, z)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,6 +57,41 @@ pub enum Anchor {
     AgainstWall(WallId),
 }
 
+/// A door or window. Ordinal matches the flag the wasm boundary exchanges with the web.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpeningKind {
+    Door,
+    Window,
+}
+
+/// A parametric cut *owned by* a wall: a door or window. Position is a distance along
+/// the wall centreline, so moving or resizing the wall carries the opening with it —
+/// the opening never stores world coordinates of its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Opening {
+    pub id: OpeningId,
+    pub wall: WallId,
+    pub kind: OpeningKind,
+    /// Centre of the opening measured along the wall centreline from `wall.start`, metres.
+    pub along: f32,
+    pub width: f32,
+    pub height: f32,
+    /// Sill height above the floor, metres. Doors sit on the floor (`sill == 0`).
+    pub sill: f32,
+}
+
+impl Opening {
+    /// Half-open horizontal span `[start, end]` along the wall centreline.
+    pub fn span(&self) -> (f32, f32) {
+        (self.along - self.width * 0.5, self.along + self.width * 0.5)
+    }
+
+    /// Top of the opening above the floor, metres.
+    pub fn head(&self) -> f32 {
+        self.sill + self.height
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     pub position: Vec3,
@@ -95,6 +131,10 @@ pub enum FloorMaterial {
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
     pub walls: Vec<Wall>,
+    /// Doors and windows, each owned by a wall (`Opening::wall`). Kept in a flat list
+    /// rather than on the walls so the `Copy` `Wall` stays cheap and deleting a wall is
+    /// a single retain over both lists.
+    pub openings: Vec<Opening>,
     pub furnishings: Vec<Furnishing>,
     pub floor_material: FloorMaterial,
     /// The room's floor footprint (metres, in loop order). Owned by the document
@@ -107,6 +147,20 @@ pub enum Command {
     DeleteWall(WallId),
     /// Remove every wall — used when regenerating a room from scratch.
     ClearWalls,
+    AddOpening(Opening),
+    RemoveOpening(OpeningId),
+    /// Slide an opening to a new centre position along its wall. Leaves size untouched.
+    MoveOpening {
+        id: OpeningId,
+        along: f32,
+    },
+    /// Absolute width/height/sill (metres) for an opening.
+    ResizeOpening {
+        id: OpeningId,
+        width: f32,
+        height: f32,
+        sill: f32,
+    },
     AddFurnishing(Furnishing),
     RemoveFurnishing(FurnishingId),
     Reposition {
@@ -137,8 +191,34 @@ impl Scene {
     pub fn apply(&mut self, command: Command) {
         match command {
             Command::AddWall(wall) => self.walls.push(wall),
-            Command::DeleteWall(id) => self.walls.retain(|w| w.id != id),
-            Command::ClearWalls => self.walls.clear(),
+            Command::DeleteWall(id) => {
+                self.walls.retain(|w| w.id != id);
+                // An opening cannot outlive the wall that owns it.
+                self.openings.retain(|o| o.wall != id);
+            }
+            Command::ClearWalls => {
+                self.walls.clear();
+                self.openings.clear();
+            }
+            Command::AddOpening(opening) => self.openings.push(opening),
+            Command::RemoveOpening(id) => self.openings.retain(|o| o.id != id),
+            Command::MoveOpening { id, along } => {
+                if let Some(opening) = self.openings.iter_mut().find(|o| o.id == id) {
+                    opening.along = along;
+                }
+            }
+            Command::ResizeOpening {
+                id,
+                width,
+                height,
+                sill,
+            } => {
+                if let Some(opening) = self.openings.iter_mut().find(|o| o.id == id) {
+                    opening.width = width;
+                    opening.height = height;
+                    opening.sill = sill;
+                }
+            }
             Command::AddFurnishing(furnishing) => self.furnishings.push(furnishing),
             Command::RemoveFurnishing(id) => self.furnishings.retain(|f| f.id != id),
             Command::Reposition { id, placement } => {
@@ -167,6 +247,15 @@ impl Scene {
 
     pub fn furnishing(&self, id: FurnishingId) -> Option<&Furnishing> {
         self.furnishings.iter().find(|f| f.id == id)
+    }
+
+    pub fn opening(&self, id: OpeningId) -> Option<&Opening> {
+        self.openings.iter().find(|o| o.id == id)
+    }
+
+    /// Openings owned by a given wall, in insertion order.
+    pub fn openings_on(&self, wall: WallId) -> impl Iterator<Item = &Opening> {
+        self.openings.iter().filter(move |o| o.wall == wall)
     }
 }
 
@@ -256,5 +345,85 @@ mod tests {
         let f = scene.furnishing(1).unwrap();
         assert_eq!(f.placement.yaw, 0.0);
         assert_eq!(f.scale, Vec3::ONE);
+    }
+
+    fn wall(id: WallId) -> Wall {
+        Wall {
+            id,
+            start: Vec2::ZERO,
+            end: Vec2::new(4.0, 0.0),
+            thickness: 0.12,
+            height: 2.5,
+        }
+    }
+
+    fn door(id: OpeningId, wall: WallId) -> Opening {
+        Opening {
+            id,
+            wall,
+            kind: OpeningKind::Door,
+            along: 2.0,
+            width: 0.9,
+            height: 2.03,
+            sill: 0.0,
+        }
+    }
+
+    #[test]
+    fn add_move_and_resize_an_opening() {
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(wall(0)));
+        scene.apply(Command::AddOpening(door(1, 0)));
+        assert_eq!(scene.openings.len(), 1);
+        assert_eq!(scene.opening(1).unwrap().span(), (1.55, 2.45));
+
+        scene.apply(Command::MoveOpening { id: 1, along: 1.0 });
+        assert_eq!(scene.opening(1).unwrap().along, 1.0);
+
+        scene.apply(Command::ResizeOpening {
+            id: 1,
+            width: 1.2,
+            height: 1.4,
+            sill: 0.9,
+        });
+        let o = scene.opening(1).unwrap();
+        assert_eq!((o.width, o.height, o.sill), (1.2, 1.4, 0.9));
+        assert_eq!(o.head(), 2.3);
+    }
+
+    #[test]
+    fn deleting_a_wall_takes_its_openings_with_it() {
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(wall(0)));
+        scene.apply(Command::AddWall(wall(1)));
+        scene.apply(Command::AddOpening(door(10, 0)));
+        scene.apply(Command::AddOpening(door(11, 1)));
+        assert_eq!(scene.openings.len(), 2);
+
+        scene.apply(Command::DeleteWall(0));
+        // Only wall 1's opening survives.
+        assert_eq!(scene.openings_on(1).count(), 1);
+        assert!(scene.opening(10).is_none());
+        assert!(scene.opening(11).is_some());
+
+        scene.apply(Command::ClearWalls);
+        assert!(scene.openings.is_empty());
+    }
+
+    #[test]
+    fn opening_commands_targeting_a_missing_id_are_no_ops() {
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(wall(0)));
+        scene.apply(Command::AddOpening(door(1, 0)));
+        scene.apply(Command::MoveOpening { id: 99, along: 0.0 });
+        scene.apply(Command::ResizeOpening {
+            id: 99,
+            width: 5.0,
+            height: 5.0,
+            sill: 5.0,
+        });
+        let o = scene.opening(1).unwrap();
+        assert_eq!(o.along, 2.0);
+        assert_eq!(o.width, 0.9);
     }
 }
