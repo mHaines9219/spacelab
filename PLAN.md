@@ -31,7 +31,7 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 | Milestone | State |
 |---|---|
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
-| M1 — Floorplan & shell | 🚧 in progress |
+| M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | ⬜ |
 | M3 — Look | ⬜ |
 | M4 — Capture companion (iOS) | ⬜ |
