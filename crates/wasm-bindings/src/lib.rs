@@ -519,15 +519,20 @@ impl Document {
     }
 
     /// Drag hot path, called once per pointer move: cursor metres in, transform out.
+    /// Orientation is preserved: re-seating snaps the position flush to a wall but
+    /// keeps whatever yaw the user rotated to, rather than re-orienting to the wall.
     pub fn drag(&mut self, x: f32, z: f32) -> Vec<f32> {
-        match self.live_selection() {
-            Some(id) => self.reseat(id, Vec2::new(x, z)),
-            None => Vec::new(),
-        }
+        let Some(id) = self.live_selection() else {
+            return Vec::new();
+        };
+        let yaw = self.furnishing(id).placement.yaw;
+        self.reseat(id, Vec2::new(x, z));
+        self.scene.apply(Command::SetYaw { id, yaw });
+        self.transform(id)
     }
 
     /// Rotate by `steps` arrow presses (positive = counter-clockwise). Spins in
-    /// place; the next drag re-snaps.
+    /// place; a later drag re-snaps the position but keeps this rotation.
     pub fn rotate(&mut self, steps: f32) -> Vec<f32> {
         let Some(id) = self.live_selection() else {
             return Vec::new();
@@ -759,6 +764,25 @@ mod tests {
         assert!(doc.undo());
         assert_eq!(doc.furnishing_transform(id)[0], start[0]);
         assert_eq!(doc.furnishing_transform(id)[2], start[2]);
+    }
+
+    #[test]
+    fn dragging_a_rotated_furnishing_keeps_its_rotation() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = chair(&mut doc);
+        doc.rotate(3.0);
+        let yaw = doc.furnishing_transform(id)[3];
+        assert!(yaw.abs() > 0.0, "rotate should give the chair a non-zero yaw");
+        // Grab and move it out in open floor: the position changes but the yaw the
+        // user rotated to must survive, rather than snapping back to the default.
+        doc.checkpoint();
+        doc.drag(2.0, 1.5);
+        assert_eq!(
+            doc.furnishing_transform(id)[3],
+            yaw,
+            "a drag must hold the rotation, not reset it"
+        );
     }
 
     #[test]

@@ -38,6 +38,18 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
 
+### Fix: a grab no longer wipes a furnishing's rotation · 2026-07-25
+
+**Accomplished**
+
+- **Dragging a rotated furnishing now holds its rotation.** The drag path re-seats the item each pointer move so it snaps flush to a nearby wall, but it applied the placement solver's result wholesale via `Reposition` — and the solver always hands back a default orientation (yaw from the wall normal, or `0` on open floor). So every grab overwrote the yaw the user had set with the arrow keys. `Document::drag` now mirrors the fix already living in `set_scale` ("scaling never re-orients an asset the user rotated"): capture the current yaw, re-seat for position, then re-apply the yaw via `SetYaw`. Position snapping is unchanged; only the rotation survives. Fixed the now-stale `rotate` doc comment and added a regression test (`dragging_a_rotated_furnishing_keeps_its_rotation`).
+- Verified: **15 Rust tests + clippy clean** in `wasm-bindings`.
+
+**Remains**
+
+- **A rotated item dragged against a wall keeps the user's yaw rather than re-orienting its back flush to that wall**, so the flush offset is still computed from the item's back face (`extent.z`) — a heavily rotated item pushed against a wall can seat slightly off. Deliberate, to honour "hold my rotation"; a floor-only variant (walls always re-orient, only open-floor drags preserve yaw) is a one-line change if that reads better.
+- All M1/M2 remains carried forward from the entries below — clearance/collision (`parry3d`) still the headline gap; `front` axis unverified; thumbnails uncached; KTX2 unbuilt; RoomPlan USD round-trip.
+
 ### Default room opens with two walls · 2026-07-25
 
 **Accomplished**
