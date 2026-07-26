@@ -114,6 +114,10 @@ pub struct Furnishing {
     /// Per-axis multiplier on `asset.extent`, in the asset's local frame
     /// (x width, y height, z depth). `Vec3::ONE` is the catalog size.
     pub scale: Vec3,
+    /// Set aside in the "bullpen": still owned by the document (so it keeps its
+    /// scale, yaw, and identity, and rides undo), but pulled out of the room —
+    /// not rendered or placed until it is re-imported. See [`Command::SetStashed`].
+    pub stashed: bool,
 }
 
 /// The floor's surface finish. The document owns the *choice*; the renderer owns
@@ -179,6 +183,13 @@ pub enum Command {
         id: FurnishingId,
         scale: Vec3,
     },
+    /// Set a furnishing aside into the bullpen (`stashed = true`) or bring it back
+    /// (`false`). Toggling this never touches scale, yaw, or anchor, so a re-imported
+    /// item keeps everything but its old position — which the caller re-seats.
+    SetStashed {
+        id: FurnishingId,
+        stashed: bool,
+    },
     /// Choose the floor's surface finish.
     SetFloorMaterial(FloorMaterial),
     /// Set the floor footprint (metres, loop order). Empty means no floor.
@@ -236,6 +247,11 @@ impl Scene {
                     furnishing.scale = scale;
                 }
             }
+            Command::SetStashed { id, stashed } => {
+                if let Some(furnishing) = self.furnishings.iter_mut().find(|f| f.id == id) {
+                    furnishing.stashed = stashed;
+                }
+            }
             Command::SetFloorMaterial(material) => self.floor_material = material,
             Command::SetFloorOutline(outline) => self.floor_outline = outline,
         }
@@ -247,6 +263,16 @@ impl Scene {
 
     pub fn furnishing(&self, id: FurnishingId) -> Option<&Furnishing> {
         self.furnishings.iter().find(|f| f.id == id)
+    }
+
+    /// Furnishings placed in the room (not set aside in the bullpen), in placement order.
+    pub fn placed_furnishings(&self) -> impl Iterator<Item = &Furnishing> {
+        self.furnishings.iter().filter(|f| !f.stashed)
+    }
+
+    /// Furnishings set aside in the bullpen, in the order they were stashed.
+    pub fn stashed_furnishings(&self) -> impl Iterator<Item = &Furnishing> {
+        self.furnishings.iter().filter(|f| f.stashed)
     }
 
     pub fn opening(&self, id: OpeningId) -> Option<&Opening> {
@@ -276,6 +302,7 @@ mod tests {
                 anchor: Anchor::Floor,
             },
             scale: Vec3::ONE,
+            stashed: false,
         }));
         scene
     }
@@ -305,6 +332,29 @@ mod tests {
     }
 
     #[test]
+    fn stashing_a_furnishing_pulls_it_from_the_placed_set_but_keeps_it_owned() {
+        let mut scene = one_chair();
+        assert_eq!(scene.placed_furnishings().count(), 1);
+        assert_eq!(scene.stashed_furnishings().count(), 0);
+
+        scene.apply(Command::SetStashed {
+            id: 1,
+            stashed: true,
+        });
+        // Still owned by the document — scale/yaw untouched — but out of the room.
+        assert_eq!(scene.furnishings.len(), 1);
+        assert_eq!(scene.placed_furnishings().count(), 0);
+        assert_eq!(scene.stashed_furnishings().map(|f| f.id).collect::<Vec<_>>(), vec![1]);
+
+        scene.apply(Command::SetStashed {
+            id: 1,
+            stashed: false,
+        });
+        assert_eq!(scene.placed_furnishings().count(), 1);
+        assert_eq!(scene.stashed_furnishings().count(), 0);
+    }
+
+    #[test]
     fn floor_material_defaults_to_light_wood_and_is_settable() {
         let mut scene = one_chair();
         assert_eq!(scene.floor_material, FloorMaterial::WoodLight);
@@ -326,6 +376,7 @@ mod tests {
                 anchor: Anchor::Floor,
             },
             scale: Vec3::ONE,
+            stashed: false,
         }));
         assert_eq!(scene.furnishings.len(), 2);
         scene.apply(Command::RemoveFurnishing(1));

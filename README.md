@@ -16,7 +16,8 @@ The M0 spike's throwaway `Spike` binding has been retired into the real `Documen
 binding: mutations flow through Rust commands, and any wall edit re-emits geometry that
 the web layer re-uploads. You can add and delete individual walls by clicking them in
 3D, drop **parametric doors and windows that snap onto walls** (they cut the wall and
-ride along it), and **Cmd/Ctrl+Z undoes any action**. Still open in M1: mitred
+ride along it), **set a furnishing aside into a bullpen** and re-import it later with its
+size and rotation intact, and **Cmd/Ctrl+Z undoes any action**. Still open in M1: mitred
 junctions, and room detection from the wall graph (multi-room / branching layouts).
 
 ### M0 gate results

@@ -489,6 +489,82 @@
         grid-column: 1 / -1;
         color: #9a978f;
       }
+
+      /* Bullpen — a strip of set-aside items along the bottom centre. */
+      .bullpen {
+        position: fixed;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 5;
+        max-width: 60vw;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #000000c4;
+        color: #e8e6e1;
+        font: 12px ui-monospace, monospace;
+      }
+      .bullpen-head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .bullpen-head strong {
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #9a978f;
+      }
+      .bullpen-list {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+      .bullpen-card {
+        position: relative;
+        flex: 0 0 auto;
+        width: 84px;
+      }
+      .bullpen-reimport {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        width: 100%;
+        padding: 6px;
+        border: 1px solid #3a3d44;
+        border-radius: 8px;
+        background: #1c1f25;
+        color: #e8e6e1;
+        font: inherit;
+        cursor: pointer;
+        text-align: left;
+      }
+      .bullpen-reimport:hover {
+        border-color: #5b9dff;
+      }
+      .bullpen-discard {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 18px;
+        height: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #3a3d44;
+        border-radius: 50%;
+        background: #1c1f25;
+        color: #c9c6bf;
+        font: 10px ui-monospace, monospace;
+        cursor: pointer;
+      }
+      .bullpen-discard:hover {
+        border-color: #d66;
+        color: #f2b8b8;
+      }
     </style>
   </head>
   <body>

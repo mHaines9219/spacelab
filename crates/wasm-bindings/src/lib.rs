@@ -283,9 +283,7 @@ impl Document {
         self.checkpoint();
         let id = self.next_id;
         self.next_id += 1;
-        // Stagger successive drops so items don't stack exactly on the room centre.
-        let n = (self.scene.furnishings.len() % 5) as f32;
-        let drop = self.room_centre() + Vec2::splat(0.3) * n;
+        let drop = self.drop_target();
         self.scene.apply(Command::AddFurnishing(Furnishing {
             id,
             asset: Asset {
@@ -297,10 +295,18 @@ impl Document {
                 anchor: Anchor::Floor,
             },
             scale: Vec3::ONE,
+            stashed: false,
         }));
         self.selected = Some(id);
         self.reseat(id, drop);
         id
+    }
+
+    /// A staggered drop point near the room centre, so successive placements (and
+    /// re-imports from the bullpen) don't stack exactly on top of each other.
+    fn drop_target(&self) -> Vec2 {
+        let n = (self.scene.placed_furnishings().count() % 5) as f32;
+        self.room_centre() + Vec2::splat(0.3) * n
     }
 
     /// Remove the selected furnishing (if any). Returns true if one was removed.
@@ -313,6 +319,66 @@ impl Document {
             }
             None => false,
         }
+    }
+
+    /// Remove any furnishing by id (placed or stashed). Returns true if one was removed.
+    /// Used to discard a bullpen item for good; clears selection if it was the target.
+    pub fn remove_furnishing(&mut self, id: u32) -> bool {
+        if self.scene.furnishing(id).is_none() {
+            return false;
+        }
+        self.checkpoint();
+        self.scene.apply(Command::RemoveFurnishing(id));
+        if self.selected == Some(id) {
+            self.selected = None;
+        }
+        true
+    }
+
+    // --- Bullpen (set aside / re-import) -----------------------------------
+    // A stashed furnishing stays in the document — keeping its scale, yaw, and identity,
+    // and riding undo — but is pulled out of the room: excluded from `furnishing_ids`
+    // (so it stops rendering) and surfaced in `stashed_ids` for the bullpen tray.
+
+    /// Set the selected furnishing aside into the bullpen. Returns its id (so the web
+    /// can move its tray card), or -1 if nothing was selected. Clears the selection,
+    /// since the item is no longer in the room.
+    pub fn stash_selected(&mut self) -> i32 {
+        match self.live_selection() {
+            Some(id) => {
+                self.checkpoint();
+                self.scene.apply(Command::SetStashed { id, stashed: true });
+                self.selected = None;
+                id as i32
+            }
+            None => -1,
+        }
+    }
+
+    /// Bring a bullpen item back into the room and select it. It re-enters at the
+    /// staggered room centre with its scale and rotation intact (only its old position
+    /// is discarded). Returns its transform, or empty if the id isn't a stashed item.
+    pub fn unstash(&mut self, id: u32) -> Vec<f32> {
+        match self.scene.furnishing(id) {
+            Some(f) if f.stashed => {}
+            _ => return Vec::new(),
+        }
+        self.checkpoint();
+        self.scene.apply(Command::SetStashed { id, stashed: false });
+        self.selected = Some(id);
+        // Re-seat at a fresh drop point but preserve the rotation the user had set —
+        // re-seating alone would reface the item to whatever wall it lands near.
+        let yaw = self.furnishing(id).placement.yaw;
+        let drop = self.drop_target();
+        self.reseat(id, drop);
+        self.scene.apply(Command::SetYaw { id, yaw });
+        self.transform(id)
+    }
+
+    /// Ids of furnishings set aside in the bullpen, in stash order — the web maps each
+    /// to its catalog entry to draw a tray card.
+    pub fn stashed_ids(&self) -> Vec<u32> {
+        self.scene.stashed_furnishings().map(|f| f.id).collect()
     }
 
     /// Select a furnishing by id (no-op if it doesn't exist). Selection is UI state,
@@ -333,9 +399,10 @@ impl Document {
         self.selected.map_or(-1, |id| id as i32)
     }
 
-    /// All furnishing ids, in placement order — the web iterates these to sync meshes.
+    /// Ids of furnishings placed in the room, in placement order — the web iterates
+    /// these to sync meshes. Excludes bullpen (stashed) items, which don't render.
     pub fn furnishing_ids(&self) -> Vec<u32> {
-        self.scene.furnishings.iter().map(|f| f.id).collect()
+        self.scene.placed_furnishings().map(|f| f.id).collect()
     }
 
     /// Transform of a specific furnishing (empty if it doesn't exist). Used to re-place
@@ -774,6 +841,61 @@ mod tests {
         assert!(doc.remove_selected());
         assert_eq!(doc.furnishing_ids(), vec![a]);
         assert_eq!(doc.selected_id(), -1);
+    }
+
+    #[test]
+    fn stashing_pulls_a_furnishing_from_the_room_into_the_bullpen_and_back() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = chair(&mut doc);
+        // Resize it so we can prove the size survives the round-trip.
+        doc.set_dimension(0, 40.0); // 40" wide
+        let width_before = doc.dimensions()[0];
+
+        // Set aside: gone from the room, present in the bullpen, selection cleared.
+        assert_eq!(doc.stash_selected(), id as i32);
+        assert!(doc.furnishing_ids().is_empty());
+        assert_eq!(doc.stashed_ids(), vec![id]);
+        assert_eq!(doc.selected_id(), -1);
+
+        // Re-import: back in the room, out of the bullpen, re-selected, same width.
+        let t = doc.unstash(id);
+        assert_eq!(t.len(), 8);
+        assert_eq!(doc.furnishing_ids(), vec![id]);
+        assert!(doc.stashed_ids().is_empty());
+        assert_eq!(doc.selected_id(), id as i32);
+        assert!((doc.dimensions()[0] - width_before).abs() < 1e-3, "width should survive");
+    }
+
+    #[test]
+    fn stashing_is_undoable_and_bullpen_items_can_be_discarded() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = chair(&mut doc);
+        doc.stash_selected();
+        assert_eq!(doc.stashed_ids(), vec![id]);
+
+        // Undo returns it to the room.
+        assert!(doc.undo());
+        assert!(doc.stashed_ids().is_empty());
+        assert_eq!(doc.furnishing_ids(), vec![id]);
+
+        // Discard a stashed item for good.
+        doc.select(id);
+        doc.stash_selected();
+        assert!(doc.remove_furnishing(id));
+        assert!(doc.stashed_ids().is_empty());
+        assert!(doc.furnishing_ids().is_empty());
+        assert!(doc.furnishing_transform(id).is_empty());
+    }
+
+    #[test]
+    fn unstash_rejects_ids_that_are_not_stashed() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let id = chair(&mut doc); // placed, not stashed
+        assert!(doc.unstash(id).is_empty());
+        assert!(doc.unstash(999).is_empty());
     }
 
     #[test]
