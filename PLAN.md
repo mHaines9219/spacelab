@@ -53,6 +53,20 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 - **Stashed items don't persist** — there's no serialization anywhere yet (M5), so a reload loses them along with the rest of the scene.
 - Carried: clearance/collision (`parry3d`) is still the headline M2 gap — a re-imported item can land overlapping others; resize still rebuilds a rectangle as two walls, wiping hand-added walls; `front=+Z` unverified; thumbnails still render client-side (now one shared context) and aren't cached to disk; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan USD round-trip; fps on one machine; dev-only probes (`__furnishingCount`, `__wallCount`, `__floorTris`, `__selectedYaw`, `__openingCount`, `__wallTris`, `__addOpeningOnWall`, `__deleteWallById`).
 
+### Draw-mode alignment lock + Conductor run scripts · 2026-07-25
+
+**Accomplished**
+
+- **Draw mode now locks the cursor onto earlier corners so the loop closes square.** On top of the existing ortho-straighten (which only aligns to the *previous* corner), `worldAt` now pulls each axis onto the nearest earlier corner within `ALIGN_M` (~8"), checking the start corner first so it wins ties — so you line the last "downward" leg up with the origin and the room shuts cleanly. A dashed guide line renders through the aligned corner (green when it's the start, echoing the close affordance). All still JS-side draw-input massaging; the emitted polygon is unchanged, so **Rule #1 holds** — Rust owns the geometry.
+- **Committed `.conductor/settings.toml`** so the Conductor setup/run scripts are versioned, not per-machine: setup regenerates the two gitignored artifacts (`ingest:build` furniture GLBs, `textures`) once per workspace; run is `npm run dev -- --port $CONDUCTOR_PORT` (rebuilds WASM every start, per-workspace port); `run_mode = "concurrent"` since nothing shared is contended.
+- Verified: `tsc` clean on `DrawEditor.tsx` (pre-existing `viewport.ts` errors are only the un-built WASM module); `.conductor/settings.toml` parses; confirmed npm forwards `--port` past the compound `&&` to vite.
+
+**Remains**
+
+- **The alignment lock is unverified in the live app** — WASM wasn't rebuilt this session, so the draw flow and green guide line haven't been driven end-to-end. `ALIGN_M = 0.2` is a guess; may feel too grabby or too weak against the 6" grid until tuned by hand.
+- Alignment inference targets *every* prior corner, not just the start; a genuinely-diagonal leg passing within ~8" of an unrelated corner's row/column will get pulled onto it. Acceptable/standard, but noted.
+- The `.conductor/` config is a new committed file riding along with the feature; this workspace was created before it existed, so its setup may need a one-time manual re-run.
+
 ### Default room opens with two walls · 2026-07-25
 
 **Accomplished**
