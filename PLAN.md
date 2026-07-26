@@ -38,6 +38,21 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
 
+### Furnishing bullpen: set aside & re-import · 2026-07-25
+
+**Accomplished**
+
+- **A bullpen for parking furnishings out of the room while rearranging.** "Set aside" on the selection panel pulls the selected item out of the 3D scene into a bottom-centre tray of thumbnail cards; clicking a card **re-imports** it (re-enters at the staggered room centre, re-selected), and the ✕ **discards** it for good. The tray only appears when something is in it.
+- **Membership is document state, per Rule #1.** `Furnishing` gained a `stashed: bool`; a stashed item stays owned by the `Scene` — keeping its scale, yaw, and identity — but is excluded from `furnishing_ids`/geometry so it stops rendering. The new `Command::SetStashed` flows through the same `apply` funnel, so **undo covers set-aside/re-import for free**, and because the furnishing is only *flagged* (never torn down and rebuilt) a **resized or rotated item comes back exactly as it left** — `unstash` re-seats at a fresh drop point but re-applies the saved yaw so re-seating doesn't reface it. New binding methods `stash_selected`/`unstash`/`stashed_ids`/`remove_furnishing`; JS keeps owning the id→catalog-entry map and draws the tray from `stashed_ids`. The catalog and bullpen now **share one offscreen thumbnail renderer** (lifted into `App`), so a re-import's card hits the cache the catalog already warmed — and that also retires the second WebGL context the catalog-only thumbnailer used to spin up.
+- Verified: **45 Rust tests + clippy clean** (new `core-scene` test that stashing pulls an item from the placed set while keeping it owned; binding tests that a set-aside item leaves the room and returns at the same size, that stash is undoable and bullpen items are discardable, and that `unstash` rejects a non-stashed id). Playwright drove create-room → place → set aside (item leaves the room, a tray card appears) → re-import (back in the room) → undo (returns to the tray) → discard, **11/11 checks, no console errors**; screenshot reviewed (two-card tray, thumbnails rendered, clear of the catalog and floor picker). WASM ~35.5 KB gzipped (was ~34).
+
+**Remains**
+
+- **Re-import lands at the room centre, not where the item was.** Dropping the old position is intentional — that's the point of setting aside — but there's no "put it back where it came from" and no drag-from-tray-to-a-spot placement, so a re-imported item usually needs a manual drag next.
+- The bullpen has **no ordering, grouping, naming, or bulk "bring all back" / "clear"** beyond stash order — fine for a handful, cramped for a whole room's worth (the strip scrolls horizontally but doesn't wrap).
+- **Stashed items don't persist** — there's no serialization anywhere yet (M5), so a reload loses them along with the rest of the scene.
+- Carried: clearance/collision (`parry3d`) is still the headline M2 gap — a re-imported item can land overlapping others; resize still rebuilds a rectangle as two walls, wiping hand-added walls; `front=+Z` unverified; thumbnails still render client-side (now one shared context) and aren't cached to disk; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan USD round-trip; fps on one machine; dev-only probes (`__furnishingCount`, `__wallCount`, `__floorTris`, `__selectedYaw`, `__openingCount`, `__wallTris`, `__addOpeningOnWall`, `__deleteWallById`).
+
 ### Draw-mode alignment lock + Conductor run scripts · 2026-07-25
 
 **Accomplished**

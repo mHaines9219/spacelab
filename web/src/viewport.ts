@@ -82,6 +82,9 @@ export type CatalogEntry = {
  */
 export type Selection = { title: string; dims: [number, number, number] } | null;
 
+/** One furnishing set aside in the bullpen: its document id and its catalog entry. */
+export type BullpenItem = { id: number; entry: CatalogEntry };
+
 /**
  * The selected opening's kind and size in inches `[width, height, sill]`, or null when no
  * opening is selected. Doors ignore the sill field.
@@ -96,6 +99,12 @@ export type ViewportHandle = {
   addFromCatalog: (entry: CatalogEntry) => Promise<void>;
   /** Remove the selected furnishing, if any. */
   removeSelected: () => void;
+  /** Set the selected furnishing aside into the bullpen, if any. */
+  stashSelected: () => void;
+  /** Bring a bullpen item back into the room by id, re-selecting it. */
+  unstash: (id: number) => Promise<void>;
+  /** Discard a bullpen item for good by id. */
+  discardStashed: (id: number) => void;
   /** Set one dimension in inches: axis 0 = width, 1 = depth, 2 = height. */
   setDimension: (axis: number, inches: number) => void;
   /** Restore the selected asset to its catalog proportions. */
@@ -147,6 +156,7 @@ export async function createViewport(
   onAddMode: (active: boolean) => void,
   onOpening: (selection: OpeningSelection) => void,
   onOpeningMode: (kind: "door" | "window" | null) => void,
+  onBullpen: (items: BullpenItem[]) => void,
 ): Promise<ViewportHandle> {
   await init();
   const doc = new Document();
@@ -463,6 +473,48 @@ export async function createViewport(
     selectFurnishing(null);
   };
 
+  // --- Bullpen (set aside / re-import) -------------------------------------
+  // Rust owns which items are stashed and their retained scale/rotation; JS maps each
+  // stashed id back to its catalog entry (via `placed`) so the tray can draw a card.
+  const refreshBullpen = () => {
+    const items: BullpenItem[] = [];
+    for (const id of doc.stashed_ids()) {
+      const entry = placed.get(id);
+      if (entry) items.push({ id, entry });
+    }
+    onBullpen(items);
+  };
+
+  const stashSelected = () => {
+    const id = doc.stash_selected();
+    if (id < 0) return;
+    const f = furnishings.get(id);
+    if (f) {
+      disposeFurnishing(f);
+      furnishings.delete(id);
+    }
+    selectFurnishing(null);
+    refreshBullpen();
+  };
+
+  const unstash = async (id: number) => {
+    const out = doc.unstash(id);
+    if (out.length < 8) return;
+    const entry = placed.get(id);
+    if (!entry) return;
+    // The item was placed before, so its template is already cached (sync in practice).
+    const template = await getTemplate(urlOf(entry));
+    selectedId = id; // so the rebuilt mesh shows its selection box
+    buildFurnishing(id, entry, template);
+    selectFurnishing(id);
+    refreshBullpen();
+  };
+
+  const discardStashed = (id: number) => {
+    if (!doc.remove_furnishing(id)) return;
+    refreshBullpen(); // no mesh exists for a stashed item, so nothing to dispose
+  };
+
   // Reconcile the furnishing meshes with the document after an undo, which can add,
   // remove, or move any of them. Synchronous: any id that can reappear was placed
   // before, so its template is already cached.
@@ -738,6 +790,7 @@ export async function createViewport(
     rebuildOpenings();
     selectOpening(null);
     for (const id of doc.furnishing_ids()) applyTransformFor(id, doc.furnishing_transform(id));
+    refreshBullpen();
     frameCamera();
   };
 
@@ -890,6 +943,9 @@ export async function createViewport(
     },
     addFromCatalog,
     removeSelected,
+    stashSelected,
+    unstash,
+    discardStashed,
     setDimension,
     resetScale,
     setFloorMaterial,
@@ -933,6 +989,7 @@ export async function createViewport(
       floorMesh.material = floorMaterials[doc.floor_material()];
       reconcileFurnishings();
       reconcileOpenings();
+      refreshBullpen();
       selectFurnishing(null);
       const hasRoom = doc.has_room();
       const [minX, minZ, maxX, maxZ] = doc.room_bounds();

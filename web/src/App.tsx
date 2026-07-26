@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createViewport,
+  type BullpenItem,
   type CatalogEntry,
   type OpeningSelection,
   type Selection,
@@ -9,6 +10,8 @@ import {
 } from "./viewport";
 import { DrawEditor } from "./DrawEditor";
 import { CatalogPanel } from "./CatalogPanel";
+import { Bullpen } from "./Bullpen";
+import { createThumbnailer, type Thumbnailer } from "./thumbnailer";
 
 const M_PER_FT = 0.3048;
 const M_PER_IN = 0.0254;
@@ -39,7 +42,14 @@ export function App() {
   const [openingSel, setOpeningSel] = useState<OpeningSelection>(null);
   const [openingMode, setOpeningMode] = useState<"door" | "window" | null>(null);
   const [floor, setFloor] = useState(0);
+  const [bullpen, setBullpen] = useState<BullpenItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // One offscreen thumbnail renderer, shared by the catalog and the bullpen so a
+  // re-import's card hits the cache the catalog already warmed.
+  const thumbRef = useRef<Thumbnailer | null>(null);
+  if (!thumbRef.current) thumbRef.current = createThumbnailer();
+  useEffect(() => () => thumbRef.current?.dispose(), []);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -51,6 +61,7 @@ export function App() {
       setAddMode,
       setOpeningSel,
       setOpeningMode,
+      setBullpen,
     ).then(
       (handle) => (handleRef.current = handle),
       (cause) => setError(String(cause)),
@@ -207,6 +218,7 @@ export function App() {
                 handleRef.current?.setDimension(axis, inches)
               }
               onReset={() => handleRef.current?.resetScale()}
+              onStash={() => handleRef.current?.stashSelected()}
               onRemove={() => handleRef.current?.removeSelected()}
             />
           )}
@@ -223,7 +235,15 @@ export function App() {
           )}
 
           <CatalogPanel
+            thumbnailer={thumbRef.current!}
             onPlace={(entry: CatalogEntry) => handleRef.current?.addFromCatalog(entry)}
+          />
+
+          <Bullpen
+            items={bullpen}
+            thumbnailer={thumbRef.current!}
+            onReimport={(id) => handleRef.current?.unstash(id)}
+            onDiscard={(id) => handleRef.current?.discardStashed(id)}
           />
 
           <FloorPicker
@@ -416,12 +436,14 @@ function SelectionPanel({
   dims,
   onSetDimension,
   onReset,
+  onStash,
   onRemove,
 }: {
   title: string;
   dims: [number, number, number];
   onSetDimension: (axis: number, inches: number) => void;
   onReset: () => void;
+  onStash: () => void;
   onRemove: () => void;
 }) {
   return (
@@ -441,6 +463,9 @@ function SelectionPanel({
       <div className="panel-actions">
         <button type="button" className="reset" onClick={onReset}>
           reset size
+        </button>
+        <button type="button" className="reset" onClick={onStash}>
+          set aside
         </button>
         <button type="button" className="reset danger" onClick={onRemove}>
           remove

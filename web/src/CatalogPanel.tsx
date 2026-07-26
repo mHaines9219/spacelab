@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CatalogEntry } from "./viewport";
-import { createThumbnailer, type Thumbnailer } from "./thumbnailer";
+import type { Thumbnailer } from "./thumbnailer";
 
 const IN_PER_M = 39.3700787;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -13,15 +13,17 @@ const dimsLabel = (d: { w: number; h: number; d: number }) =>
  * and a free-text search, and places the clicked asset in the room. Placement itself
  * goes through Rust (via the viewport handle); this panel is pure browse + intent.
  */
-export function CatalogPanel({ onPlace }: { onPlace: (entry: CatalogEntry) => void }) {
+export function CatalogPanel({
+  onPlace,
+  thumbnailer,
+}: {
+  onPlace: (entry: CatalogEntry) => void;
+  thumbnailer: Thumbnailer;
+}) {
   const [entries, setEntries] = useState<CatalogEntry[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [failed, setFailed] = useState(false);
-
-  const thumbRef = useRef<Thumbnailer | null>(null);
-  if (!thumbRef.current) thumbRef.current = createThumbnailer();
-  useEffect(() => () => thumbRef.current?.dispose(), []);
 
   useEffect(() => {
     fetch("/assets/catalog.json")
@@ -87,7 +89,7 @@ export function CatalogPanel({ onPlace }: { onPlace: (entry: CatalogEntry) => vo
             title={`Add ${e.title}`}
             onClick={() => onPlace(e)}
           >
-            <Thumb url={`/assets/${e.blob}`} alt={e.title} thumbnailer={thumbRef.current!} />
+            <Thumb url={`/assets/${e.blob}`} alt={e.title} thumbnailer={thumbnailer} />
             <span className="card-name">{e.title}</span>
             <span className="card-dims">{dimsLabel(e.dims_m)}</span>
           </button>
@@ -98,7 +100,7 @@ export function CatalogPanel({ onPlace }: { onPlace: (entry: CatalogEntry) => vo
 }
 
 /** A catalog thumbnail that renders its GLB only once it scrolls into view. */
-function Thumb({
+export function Thumb({
   url,
   alt,
   thumbnailer,
