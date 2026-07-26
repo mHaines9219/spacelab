@@ -43,12 +43,41 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 **Accomplished**
 
 - **Dragging a rotated furnishing now holds its rotation.** The drag path re-seats the item each pointer move so it snaps flush to a nearby wall, but it applied the placement solver's result wholesale via `Reposition` — and the solver always hands back a default orientation (yaw from the wall normal, or `0` on open floor). So every grab overwrote the yaw the user had set with the arrow keys. `Document::drag` now mirrors the fix already living in `set_scale` ("scaling never re-orients an asset the user rotated"): capture the current yaw, re-seat for position, then re-apply the yaw via `SetYaw`. Position snapping is unchanged; only the rotation survives. Fixed the now-stale `rotate` doc comment and added a regression test (`dragging_a_rotated_furnishing_keeps_its_rotation`).
-- Verified: **15 Rust tests + clippy clean** in `wasm-bindings`.
+- Verified: **17 `wasm-bindings` tests + clippy clean** (46 across the workspace after merging the bullpen entry below).
 
 **Remains**
 
 - **A rotated item dragged against a wall keeps the user's yaw rather than re-orienting its back flush to that wall**, so the flush offset is still computed from the item's back face (`extent.z`) — a heavily rotated item pushed against a wall can seat slightly off. Deliberate, to honour "hold my rotation"; a floor-only variant (walls always re-orient, only open-floor drags preserve yaw) is a one-line change if that reads better.
 - All M1/M2 remains carried forward from the entries below — clearance/collision (`parry3d`) still the headline gap; `front` axis unverified; thumbnails uncached; KTX2 unbuilt; RoomPlan USD round-trip.
+
+### Furnishing bullpen: set aside & re-import · 2026-07-25
+
+**Accomplished**
+
+- **A bullpen for parking furnishings out of the room while rearranging.** "Set aside" on the selection panel pulls the selected item out of the 3D scene into a bottom-centre tray of thumbnail cards; clicking a card **re-imports** it (re-enters at the staggered room centre, re-selected), and the ✕ **discards** it for good. The tray only appears when something is in it.
+- **Membership is document state, per Rule #1.** `Furnishing` gained a `stashed: bool`; a stashed item stays owned by the `Scene` — keeping its scale, yaw, and identity — but is excluded from `furnishing_ids`/geometry so it stops rendering. The new `Command::SetStashed` flows through the same `apply` funnel, so **undo covers set-aside/re-import for free**, and because the furnishing is only *flagged* (never torn down and rebuilt) a **resized or rotated item comes back exactly as it left** — `unstash` re-seats at a fresh drop point but re-applies the saved yaw so re-seating doesn't reface it. New binding methods `stash_selected`/`unstash`/`stashed_ids`/`remove_furnishing`; JS keeps owning the id→catalog-entry map and draws the tray from `stashed_ids`. The catalog and bullpen now **share one offscreen thumbnail renderer** (lifted into `App`), so a re-import's card hits the cache the catalog already warmed — and that also retires the second WebGL context the catalog-only thumbnailer used to spin up.
+- Verified: **45 Rust tests + clippy clean** (new `core-scene` test that stashing pulls an item from the placed set while keeping it owned; binding tests that a set-aside item leaves the room and returns at the same size, that stash is undoable and bullpen items are discardable, and that `unstash` rejects a non-stashed id). Playwright drove create-room → place → set aside (item leaves the room, a tray card appears) → re-import (back in the room) → undo (returns to the tray) → discard, **11/11 checks, no console errors**; screenshot reviewed (two-card tray, thumbnails rendered, clear of the catalog and floor picker). WASM ~35.5 KB gzipped (was ~34).
+
+**Remains**
+
+- **Re-import lands at the room centre, not where the item was.** Dropping the old position is intentional — that's the point of setting aside — but there's no "put it back where it came from" and no drag-from-tray-to-a-spot placement, so a re-imported item usually needs a manual drag next.
+- The bullpen has **no ordering, grouping, naming, or bulk "bring all back" / "clear"** beyond stash order — fine for a handful, cramped for a whole room's worth (the strip scrolls horizontally but doesn't wrap).
+- **Stashed items don't persist** — there's no serialization anywhere yet (M5), so a reload loses them along with the rest of the scene.
+- Carried: clearance/collision (`parry3d`) is still the headline M2 gap — a re-imported item can land overlapping others; resize still rebuilds a rectangle as two walls, wiping hand-added walls; `front=+Z` unverified; thumbnails still render client-side (now one shared context) and aren't cached to disk; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan USD round-trip; fps on one machine; dev-only probes (`__furnishingCount`, `__wallCount`, `__floorTris`, `__selectedYaw`, `__openingCount`, `__wallTris`, `__addOpeningOnWall`, `__deleteWallById`).
+
+### Draw-mode alignment lock + Conductor run scripts · 2026-07-25
+
+**Accomplished**
+
+- **Draw mode now locks the cursor onto earlier corners so the loop closes square.** On top of the existing ortho-straighten (which only aligns to the *previous* corner), `worldAt` now pulls each axis onto the nearest earlier corner within `ALIGN_M` (~8"), checking the start corner first so it wins ties — so you line the last "downward" leg up with the origin and the room shuts cleanly. A dashed guide line renders through the aligned corner (green when it's the start, echoing the close affordance). All still JS-side draw-input massaging; the emitted polygon is unchanged, so **Rule #1 holds** — Rust owns the geometry.
+- **Committed `.conductor/settings.toml`** so the Conductor setup/run scripts are versioned, not per-machine: setup regenerates the two gitignored artifacts (`ingest:build` furniture GLBs, `textures`) once per workspace; run is `npm run dev -- --port $CONDUCTOR_PORT` (rebuilds WASM every start, per-workspace port); `run_mode = "concurrent"` since nothing shared is contended.
+- Verified: `tsc` clean on `DrawEditor.tsx` (pre-existing `viewport.ts` errors are only the un-built WASM module); `.conductor/settings.toml` parses; confirmed npm forwards `--port` past the compound `&&` to vite.
+
+**Remains**
+
+- **The alignment lock is unverified in the live app** — WASM wasn't rebuilt this session, so the draw flow and green guide line haven't been driven end-to-end. `ALIGN_M = 0.2` is a guess; may feel too grabby or too weak against the 6" grid until tuned by hand.
+- Alignment inference targets *every* prior corner, not just the start; a genuinely-diagonal leg passing within ~8" of an unrelated corner's row/column will get pulled onto it. Acceptable/standard, but noted.
+- The `.conductor/` config is a new committed file riding along with the feature; this workspace was created before it existed, so its setup may need a one-time manual re-run.
 
 ### Default room opens with two walls · 2026-07-25
 
