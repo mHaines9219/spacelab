@@ -26,13 +26,13 @@
 
 Updated at the end of every PR — see [Keeping this section current](#keeping-this-section-current). Newest entry first.
 
-**Now: the MVP build is reviewable on `main`,** and with M1 ticked below, **M1 is the last
-of the four MVP milestones whose own bullet is fully delivered.** MVP is **M0–M3 + M5** —
+**Now: the MVP build is reviewable on `main`,** and with M3 ticked below, **M2 is the only
+M0–M3 milestone still short of its own bullet.** MVP is **M0–M3 + M5** —
 [amended 2026-08-01](#milestones) on the owner's ruling; M4 moves after MVP and persistence
 moves into it.
 
 Read the table rather than that sentence, because two rows are deliberately short of their
-own wording: **M3 still owes camera framing**, which its milestone bullet names outright,
+own wording: **M2 still owes walkway clearance, door-swing arcs and furniture-vs-wall**,
 and **M5 is the save/load slice only** — share links and glTF/USDZ export are named and not
 built. The product a reviewer can use end to end is here; two milestone definitions are not
 yet satisfied, and the rows say so rather than rounding up.
@@ -42,10 +42,83 @@ yet satisfied, and the rows say so rather than rounding up.
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
 | M1 — Floorplan & shell | ✅ [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
-| M3 — Look | 🚧 (renderer basics landed early, during M1) |
+| M3 — Look | ✅ all five named deliverables — PBR materials, material swapping, lighting presets, shadows, camera framing |
 | M5 — Persistence & sharing | 🚧 save/load ✅ **(the MVP slice)** — share links and glTF/USDZ export deferred |
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
+
+### M3 ✅ — the camera now solves for the room instead of guessing at it · 2026-08-02
+
+**Accomplished**
+
+- **Camera framing, the last thing M3's own bullet named, is in.** With it the row flips
+  to ✅: PBR materials, material swapping, lighting presets, shadows and camera framing
+  are all on `main`. The prose above the table moved with the row — leaving it saying
+  *"M3 still owes camera framing"* would be the heading-over-the-wrong-body failure this
+  log has already paid for twice.
+- **The framing bug was that the camera was never an input to it.** The old placement
+  derived a distance from the footprint alone (`span * 0.75, span * 1.15 + 2.4,
+  span * 0.85`). Field of view is *vertical*, so the horizontal one narrows as the
+  viewport does — and a wide room in a tall window ran off both sides. A 10 x 3 m room at
+  aspect 0.5 needed ~5.2 m of half-width and had 4.1 m. Nothing in the formula could
+  notice, because aspect was not one of its inputs.
+- **The distance is now solved, not guessed.** `web/src/framing.ts` projects the room's
+  eight corners onto the camera basis and takes the smallest distance that keeps every one
+  inside both frustum planes.
+- **The viewing angle is deliberately unchanged**, including its size-dependent
+  steepening. That was a real aesthetic decision — a steeper look-down stops near walls
+  crowding the floor in small rooms — and the lighting presets are tuned to sit off *this*
+  axis. Only the distance was wrong, so only the distance moved; a test pins the direction
+  so it cannot drift silently.
+- **Framing measures the rendered meshes, not `room_bounds()`.** The document's bounds are
+  the floor outline and know nothing about wall height, which lives in Rust. Reading the
+  meshes keeps that number in one place rather than copying it into the renderer to drift.
+- **`F` reframes, and so does the toolbar.** Framing had only ever run on a room edit, and
+  orbiting is unbounded: a user who panned off the room had no way back short of reloading
+  — and after M5 a reload no longer resets the view either, because the room comes back
+  with it. The shortcut is guarded against firing while a dimension field has focus.
+- **A load reframes; an undo does not.** They share `resyncAll`, so the reframe sits on the
+  load path only. A restored room otherwise inherits whatever camera the page booted with,
+  while a camera that jumped on every undo would be worse than one that stayed put.
+- Verified: **9 new unit tests** and **5 new browser specs**, and the fit assertions were
+  shown to discriminate — reverting `frameCamera` to the old formula fails the
+  tall-narrow-window spec and only that one. Full suites: 26 unit, 33 browser, 114 Rust,
+  `tsc` clean.
+
+**Remains**
+
+- **Framing fits the canvas, and the floating panels sit on top of the canvas.** A 40 ft
+  room is fully inside the frustum at every viewport shape tested, and its far end can
+  still be behind the furniture panel — measured at 0.93 of half-frame at both 620x1000
+  and 1440x900, which is a correct fit and a partly-hidden room. Framing to the
+  *unobstructed* region is a layout change rather than a camera one, so it is recorded
+  here rather than absorbed quietly.
+- **Nothing re-keys the light to the current view.** The presets are tuned off the
+  *default* framing's azimuth, so once the user orbits, the flattering angle is no longer
+  guaranteed. Carried forward from the lighting entry and still open; auto-swinging the
+  key light as the camera moves was considered and not done, because shadows sliding
+  around under an orbit is its own kind of wrong.
+- **Reframing is manual after the first edit.** Resizing the room reframes, but adding a
+  wall that extends past the old footprint does not — the room can grow out of shot until
+  the user presses `F`.
+- **No saved camera.** The save envelope carries the document, not the view, so a reload
+  frames afresh rather than returning the user to where they were looking.
+- **The web side still has no formatter**, and that gap widened rather than narrowed
+  today: `cargo fmt` is now gated, so Rust is held to a standard TypeScript is not.
+  `prettier` is not in the tree. Carried from the entry below, sharpened because this PR
+  adds three more `web/src/` files to the set nothing formats.
+- Carried from the `rustfmt` entry below: **`cargo fmt` is gated but invisible in the
+  check list**, since the context enforcing it is named `cargo test + clippy`; and there
+  is **no `rustfmt.toml`**, so the tree is clean against stock defaults by choice-by-
+  omission — and `@stable` floats, so the definition of formatted moves with the toolchain.
+- Carried: **M2** still owes walkway clearance, door-swing arcs and furniture-vs-wall —
+  now the only M0–M3 milestone short of its own wording; **M5** is the save/load slice
+  only, with no share links and no glTF/USDZ export; the draw tool still accepts a
+  self-intersecting polygon and says nothing; no 2D plan view of an existing room; no
+  migration path, only a version check; one autosave slot with no named saves, and
+  `localStorage` silently finite; the browser suite is ~12 minutes every PR pays; the unit
+  layer covers four modules rather than the whole of `web/src/`; a real-LiDAR RoomPlan
+  round-trip still owed.
 
 ### M2: door-swing arcs — whether a door has room to open · 2026-08-02
 

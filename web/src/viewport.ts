@@ -5,6 +5,7 @@ import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import init, { Document } from "./wasm/wasm_bindings.js";
 import { assertBindingIsCurrent } from "./binding-guard";
+import { frameBounds, type Bounds } from "./framing";
 
 const TEX_ROOT = "/assets/textures";
 // Directory per floor finish; index matches Rust's `FloorMaterial` ordinal.
@@ -216,6 +217,15 @@ export type ViewportHandle = {
    * gets forgotten is the one that silently stops saving.
    */
   documentRevision: () => number;
+  /**
+   * Put the camera back where the whole room is in shot.
+   *
+   * Framing has always happened on a room edit, but orbiting is unbounded and nothing
+   * undid it: a user who dollied out past the room had no way back short of reloading
+   * the page — and after M5, reloading no longer even resets the view, because the room
+   * comes back with it.
+   */
+  frameCamera: () => void;
 };
 
 export type UndoResult = {
@@ -264,6 +274,22 @@ export async function createViewport(
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(2.1, 0.6, 1.7);
   controls.enableDamping = true;
+
+  /**
+   * The canvas's aspect ratio right now, read from the element rather than from
+   * `camera.aspect`.
+   *
+   * `ResizeObserver` fires asynchronously after `observe`, so anything that frames the
+   * camera during boot — a restored room, notably — can run while `camera.aspect` is
+   * still the placeholder `1` the camera was constructed with above. Framing against a
+   * stale aspect is the bug `frameCamera` exists to avoid, so it does not read the field
+   * that might not have been written yet. Declared here, beside the camera, so a future
+   * boot-time caller cannot land above it.
+   */
+  const currentAspect = () => {
+    const { clientWidth, clientHeight } = canvas;
+    return clientHeight > 0 && clientWidth > 0 ? clientWidth / clientHeight : camera.aspect;
+  };
 
   const sun = new THREE.DirectionalLight(0xffffff, 3.4);
   sun.castShadow = true;
@@ -1016,16 +1042,39 @@ export async function createViewport(
     roomAreasM2 = Array.from(doc.detected_room_areas());
   };
 
-  // Frame the camera to the current footprint so any room size fits nicely.
+  // Frame the camera so the whole room is in shot at the viewport's current shape.
+  //
+  // Measured off the rendered meshes rather than `room_bounds()`, which is the floor
+  // outline and so knows nothing about wall height. Wall height lives in Rust, and
+  // duplicating it here would be a second copy to keep in step — the meshes already
+  // carry it, having been built from the buffers Rust emitted.
+  const roomBox = new THREE.Box3();
   const frameCamera = () => {
-    const [minX, minZ, maxX, maxZ] = doc.room_bounds();
-    const cx = (minX + maxX) / 2;
-    const cz = (minZ + maxZ) / 2;
-    const span = Math.max(maxX - minX, maxZ - minZ, 1);
-    controls.target.set(cx, 0.4, cz);
-    // Steeper look-down so tall near walls don't crowd the floor in smaller rooms.
-    camera.position.set(cx + span * 0.75, span * 1.15 + 2.4, cz + span * 0.85);
+    roomBox.makeEmpty();
+    for (const mesh of [floorMesh, wallMesh]) {
+      if (mesh.geometry.getAttribute("position")?.count) roomBox.expandByObject(mesh);
+    }
+    const bounds: Bounds = roomBox.isEmpty()
+      ? { min: [0, 0, 0], max: [0, 0, 0] }
+      : { min: roomBox.min.toArray(), max: roomBox.max.toArray() };
+
+    const { position, target } = frameBounds(bounds, camera.fov, currentAspect());
+
+    // Snap, don't drift. Damping keeps easing the camera towards its target over several
+    // frames, and a pan gesture leaves a residual pan that `update()` folds into `target`
+    // on every one of those frames — so a reframe that only sets the pose is dragged back
+    // off the room while that residual bleeds out. It is invisible at 60fps, where the
+    // residual has all but decayed by the time F is pressed; at a starved frame rate (CI
+    // runs the suite near 9fps) enough of it survives to walk the room off the edge, which
+    // is the "F does not bring it back" failure. Turning damping off makes `update()` zero
+    // the pending pan/rotate deltas rather than decay them: the first flushes whatever the
+    // gesture left behind, the second lands the solved pose with nothing left to undo it.
+    controls.enableDamping = false;
     controls.update();
+    controls.target.set(...target);
+    camera.position.set(...position);
+    controls.update();
+    controls.enableDamping = true;
   };
 
   // A room was (re)generated: rebuild geometry and reframe. Furnishings persist and
@@ -1072,7 +1121,7 @@ export async function createViewport(
   const resize = new ResizeObserver(() => {
     const { clientWidth, clientHeight } = canvas;
     renderer.setSize(clientWidth, clientHeight, false);
-    camera.aspect = clientWidth / Math.max(clientHeight, 1);
+    camera.aspect = currentAspect();
     camera.updateProjectionMatrix();
   });
   resize.observe(canvas);
@@ -1128,6 +1177,7 @@ export async function createViewport(
       __addOpeningOnWall?: (kind: "door" | "window", wallId: number) => number;
       __crowdedIds?: () => number[];
       __outlines?: () => { id: number; visible: boolean; colour: number }[];
+      __roomOnScreen?: () => number;
     };
     probe.__selectedYaw = () =>
       selectedId !== null ? (furnishings.get(selectedId)?.group.rotation.y ?? null) : null;
@@ -1156,6 +1206,38 @@ export async function createViewport(
         .sort((a, b) => a.id - b.id);
     probe.__openingCount = () => openings.length;
     probe.__wallTris = () => (wallMesh.geometry.index?.count ?? 0) / 3;
+    /**
+     * How far the room's furthest corner is from the centre of the screen, in units of
+     * half-viewport: `<= 1` is fully in shot, `> 1` is off the edge.
+     *
+     * Projected through the live camera and its live projection matrix, so it measures
+     * what is actually on screen rather than re-running the framing arithmetic — a spec
+     * built on the latter would agree with `frameBounds` even if nothing ever applied
+     * its result to the camera.
+     */
+    probe.__roomOnScreen = () => {
+      roomBox.makeEmpty();
+      for (const mesh of [floorMesh, wallMesh]) {
+        if (mesh.geometry.getAttribute("position")?.count) roomBox.expandByObject(mesh);
+      }
+      if (roomBox.isEmpty()) return 0;
+      camera.updateMatrixWorld();
+      camera.updateProjectionMatrix();
+      const corner = new THREE.Vector3();
+      let worst = 0;
+      for (const x of [roomBox.min.x, roomBox.max.x]) {
+        for (const y of [roomBox.min.y, roomBox.max.y]) {
+          for (const z of [roomBox.min.z, roomBox.max.z]) {
+            corner.set(x, y, z).project(camera);
+            // `project` divides by w; a corner behind the camera comes back mirrored,
+            // so guard on depth rather than trusting the x/y it reports.
+            if (corner.z > 1) return Infinity;
+            worst = Math.max(worst, Math.abs(corner.x), Math.abs(corner.y));
+          }
+        }
+      }
+      return worst;
+    };
     // Drive a placement at the wall's midpoint, exercising the same snap + rebuild path
     // the pointer handler uses, without having to hit a wall pixel from screen space.
     probe.__addOpeningOnWall = (kind, wallId) => {
@@ -1255,6 +1337,7 @@ export async function createViewport(
     },
     saveJson: () => doc.save_json(),
     documentRevision: () => doc.revision(),
+    frameCamera,
     loadJson: async (json) => {
       const outcome = doc.load_json(json) as LoadReport;
       // Rust guarantees a failed load leaves the document untouched, so there is
@@ -1263,6 +1346,12 @@ export async function createViewport(
         return { ok: false, reason: outcome.kind, message: outcome.message };
       }
       const ui = resyncAll();
+      // A load replaces the room wholesale, so the camera it was framed for is gone —
+      // on a page reload it is still at its construction default, which suits the
+      // restored room only by coincidence. `resyncAll` deliberately does not do this,
+      // because it is shared with undo and a camera that jumps on every undo is worse
+      // than one that stays put.
+      frameCamera();
       // Templates are GLB loads, so the room is not actually restored until this
       // settles. Awaiting it is what makes "restored" mean the user can see it.
       await restoreFurnishings();

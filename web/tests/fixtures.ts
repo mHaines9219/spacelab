@@ -14,6 +14,7 @@ export type Probes = {
   __openingCount: () => number;
   __crowdedIds: () => number[];
   __outlines: () => { id: number; visible: boolean; colour: number }[];
+  __roomOnScreen: () => number;
   __deleteWallById: (id: number) => void;
   __addOpeningOnWall: (kind: "door" | "window", wallId: number) => number;
 };

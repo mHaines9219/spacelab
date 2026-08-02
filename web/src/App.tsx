@@ -30,6 +30,23 @@ import {
  */
 const REVISION_POLL_MS = 400;
 
+/**
+ * Is the user typing into something?
+ *
+ * Bare-letter shortcuts have to ask this before acting, or they fire mid-word in a
+ * dimension field. `contentEditable` is included because it is a text surface that is
+ * neither an input nor a textarea, and a shortcut that eats keystrokes in one is
+ * indistinguishable from a broken field.
+ */
+function isTyping(): boolean {
+  const el = document.activeElement;
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+  );
+}
+
 const M_PER_FT = 0.3048;
 const M_PER_IN = 0.0254;
 const feetInchesToM = (ft: number, inch: number) => ft * M_PER_FT + inch * M_PER_IN;
@@ -253,6 +270,21 @@ export function App() {
   // browser's own text undo still works there.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // `F` reframes. An unmodified letter needs a wider guard than Cmd+Z does: typing
+      // a dimension into a numeric field must not fire it, and neither should any
+      // modified chord, or Cmd+F would stop opening the browser's find bar.
+      if (
+        e.key.toLowerCase() === "f" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        stage === "scene" &&
+        !isTyping()
+      ) {
+        e.preventDefault();
+        handleRef.current?.frameCamera();
+        return;
+      }
       const isUndo =
         (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey;
       if (!isUndo || stage !== "scene") return;
@@ -344,6 +376,14 @@ export function App() {
               onClick={() => setStage("choose")}
             >
               new floor plan
+            </button>
+            <button
+              type="button"
+              className="reset"
+              title="Frame the whole room (F)"
+              onClick={() => handleRef.current?.frameCamera()}
+            >
+              frame room
             </button>
             <button type="button" className="reset" onClick={exportRoom}>
               export room
