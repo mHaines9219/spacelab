@@ -26,18 +26,95 @@
 
 Updated at the end of every PR — see [Keeping this section current](#keeping-this-section-current). Newest entry first.
 
-**Now: M1 — Floorplan & shell.** MVP is **M0–M3 + M5** — [amended 2026-08-01](#milestones)
-on the owner's ruling; M4 moves after MVP and persistence moves into it.
+**Now: the MVP build is reviewable on `main`,** and with M1 ticked below, **M1 is the last
+of the four MVP milestones whose own bullet is fully delivered.** MVP is **M0–M3 + M5** —
+[amended 2026-08-01](#milestones) on the owner's ruling; M4 moves after MVP and persistence
+moves into it.
+
+Read the table rather than that sentence, because two rows are deliberately short of their
+own wording: **M3 still owes camera framing**, which its milestone bullet names outright,
+and **M5 is the save/load slice only** — share links and glTF/USDZ export are named and not
+built. The product a reviewer can use end to end is here; two milestone definitions are not
+yet satisfied, and the rows say so rather than rounding up.
 
 | Milestone | State |
 |---|---|
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
-| M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
+| M1 — Floorplan & shell | ✅ [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
 | M3 — Look | 🚧 (renderer basics landed early, during M1) |
 | M5 — Persistence & sharing | 🚧 save/load ✅ **(the MVP slice)** — share links and glTF/USDZ export deferred |
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
+
+### M1 ✅ — every deliverable its own bullet names is on `main` · 2026-08-02
+
+**Accomplished**
+
+- **The M1 row flips to ✅, and this entry is the evidence rather than the announcement.**
+  M1's bullet names four things. Each was checked against the working tree at `ff563df`,
+  by locating the code, not by reading this log — the log is what we are grading, so it
+  cannot also be the grader.
+
+  | M1 names | Where it lives on `main` |
+  |---|---|
+  | 2D wall drawing with snapping | `web/src/DrawEditor.tsx` — 6″ grid, ortho lock, alignment lock |
+  | parametric doors/windows | `Opening` in `core-scene`, `seat_opening` in `core-geometry` |
+  | extrusion to 3D | `wall_mesh` in `core-geometry/src/lib.rs`, mitring in `junction.rs` |
+  | room detection from the wall graph | `rooms()` in `core-geometry/src/room.rs`, surfaced by `detected_room_areas` → the area readout in `App.tsx` |
+
+- **Room detection is reachable, not merely present.** The last of the four was the one
+  worth re-checking, because it spent two PRs as a binding nothing called — a correct
+  module wired to nothing is the invisible-box failure at the file level. It now runs
+  through `viewport.ts:1016` into a readout a user can see, which is what moved it from
+  built to delivered.
+- **What the tick means, in words:** *everything M1's own bullet names is built and
+  verified on `main`.* It does not mean the floorplan experience is finished, and the
+  Remains below are the specific ways it is not.
+
+**Remains**
+
+- **Inside M1's scope and genuinely rough: the draw tool accepts a self-intersecting
+  polygon.** Nothing rejects one, and `triangulate` (`core-geometry/src/lib.rs:259`) breaks
+  out of its ear-clipping loop on a shape it cannot clip — *"degenerate or
+  self-intersecting; stop rather than loop forever"*. So it degrades instead of hanging,
+  which is the right failure, but the resulting floor is undefined and the user is told
+  nothing. This is the one soft spot in "2D wall drawing with snapping" and it is inside
+  the ticked scope, recorded here rather than quietly carried by the ✅.
+- **No 2D plan view of an existing room.** `DrawEditor` is a creation-time tool only —
+  `App.tsx:286` renders it at `stage === "draw"`, and once `stage === "scene"` there is no
+  plan view, no 2D↔3D sync, and no 2D representation of doors and windows. §4 of this plan
+  lists *"single-user 2D + 3D synced views"* under MVP and calls the pairing
+  *"consistently what casual users find most legible."* **It is in no milestone's bullet,
+  which is why it has never been owned** — a scope gap between §4 and the milestone list,
+  not something M1 failed to deliver. Parked with the owner at review; recorded here so the
+  ✅ cannot be read as covering it.
+- **Deliberate trades inside M1, all previously argued in their own entries:** T-junctions
+  stay square; corners shallower than ~14° keep the old overlap rather than growing a
+  spike; a mitred joint leaves two coincident dead end caps; shrinking a room can leave a
+  hand-drawn wall standing outside the floor, because keeping that wall is the entire point
+  of #19.
+- **Not in M1's scope, listed so the tick is not misread as covering them:** no per-wall
+  height or thickness editing, resize is rectangle-only, openings have no 2D
+  representation, and two walls that merely cross mid-span still make no corner for
+  detection.
+- **Closed since the entry below, not dropped from it: the `vitest` enforcement flip.**
+  That Remains item is deliberately absent from the carry-forward list rather than
+  overlooked. Verified live against the API rather than taken from the report of it —
+  `required_status_checks` now lists all five contexts (`cargo test + clippy`, `vitest`,
+  `tsc + browser suite`, `PLAN.md log`, `PR targets main`), so a red unit job now does
+  stop a merge. `PR targets main` was flipped in the same call, having been advisory since
+  it landed in #21.
+- Carried from the entry below, unchanged and none of it closed by this PR: one autosave
+  slot with no named saves; `localStorage` origin-scoped and silently finite; a furnishing
+  whose catalog entry has vanished is skipped on restore without telling anyone; autosave
+  polls every 400 ms rather than being signalled; no share links and no glTF/USDZ export;
+  the unit layer covers only `persistence.ts` and the binding guard; the browser suite is
+  ~12 minutes every PR pays (measured on #26, correcting the ~9 minutes previously quoted);
+  `cargo fmt` still ungated and the tree not `rustfmt`-clean; no migration path, only a
+  version check; walkway clearance, door-swing arcs and furniture-vs-wall still open in M2;
+  **camera framing still open in M3, which its own bullet names** — that row cannot flip
+  until it lands; a real-LiDAR RoomPlan round-trip still owed.
 
 ### M5: a refresh no longer eats the room · 2026-08-02
 
