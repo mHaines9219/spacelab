@@ -148,6 +148,20 @@ pub enum WallMaterial {
     Clay,
 }
 
+/// The room's lighting mood. Same split again: the document owns the *choice*, the
+/// renderer owns what each preset means (sun colour, angle and intensity, how much the
+/// environment fills the shadows). Ordinal matches the index the wasm boundary
+/// exchanges with the web layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LightingPreset {
+    /// The high neutral sun the scene carried before lighting was selectable.
+    #[default]
+    Noon,
+    Morning,
+    Evening,
+    Overcast,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
     pub walls: Vec<Wall>,
@@ -158,6 +172,7 @@ pub struct Scene {
     pub furnishings: Vec<Furnishing>,
     pub floor_material: FloorMaterial,
     pub wall_material: WallMaterial,
+    pub lighting: LightingPreset,
     /// The room's floor footprint (metres, in loop order). Owned by the document
     /// independently of the walls, so removing a wall never reshapes the floor.
     pub floor_outline: Vec<Vec2>,
@@ -211,6 +226,8 @@ pub enum Command {
     SetFloorMaterial(FloorMaterial),
     /// Choose the walls' paint finish.
     SetWallMaterial(WallMaterial),
+    /// Choose the room's lighting mood.
+    SetLighting(LightingPreset),
     /// Set the floor footprint (metres, loop order). Empty means no floor.
     SetFloorOutline(Vec<Vec2>),
 }
@@ -273,6 +290,7 @@ impl Scene {
             }
             Command::SetFloorMaterial(material) => self.floor_material = material,
             Command::SetWallMaterial(material) => self.wall_material = material,
+            Command::SetLighting(preset) => self.lighting = preset,
             Command::SetFloorOutline(outline) => self.floor_outline = outline,
         }
     }
@@ -390,15 +408,25 @@ mod tests {
         assert_eq!(scene.wall_material, WallMaterial::Sage);
     }
 
-    /// The two finishes are independent choices — picking a floor must not disturb the
-    /// walls, and vice versa.
+    /// The finishes and the lighting are independent choices — picking one must not
+    /// disturb the others.
     #[test]
-    fn floor_and_wall_finishes_are_independent() {
+    fn floor_wall_and_lighting_choices_are_independent() {
         let mut scene = one_chair();
         scene.apply(Command::SetWallMaterial(WallMaterial::Clay));
         scene.apply(Command::SetFloorMaterial(FloorMaterial::Tile));
+        scene.apply(Command::SetLighting(LightingPreset::Evening));
         assert_eq!(scene.wall_material, WallMaterial::Clay);
         assert_eq!(scene.floor_material, FloorMaterial::Tile);
+        assert_eq!(scene.lighting, LightingPreset::Evening);
+    }
+
+    #[test]
+    fn lighting_defaults_to_noon_and_is_settable() {
+        let mut scene = one_chair();
+        assert_eq!(scene.lighting, LightingPreset::Noon);
+        scene.apply(Command::SetLighting(LightingPreset::Overcast));
+        assert_eq!(scene.lighting, LightingPreset::Overcast);
     }
 
     #[test]

@@ -34,10 +34,57 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
-| M3 — Look | 🚧 |
+| M3 — Look | 🚧 (renderer basics landed early, during M1) |
 | M5 — Persistence & sharing | ⬜ **in MVP** |
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
+
+### M3: lighting presets as document state · 2026-08-01
+
+**Accomplished**
+
+- **The room takes a lighting mood, and the document owns the choice.** New
+  `LightingPreset` enum (`Noon`, `Morning`, `Evening`, `Overcast`) + a `SetLighting`
+  command on the `Scene` — the third use of the same shape as `FloorMaterial` and
+  `WallMaterial`, so **Rule #1 holds**: Rust owns *which* mood is chosen, the renderer
+  owns what it means (sun colour, angle, intensity, and how much the environment fills
+  the shadows). Undo comes free from the shared `apply` funnel. New binding methods
+  `lighting` / `set_lighting`; the picker grew a third row.
+- **The default is now the single source of the opening lighting.** The sun position and
+  `environmentIntensity` used to be literals at construction; they are applied from the
+  preset instead, and index 0 reproduces the previous fixed sun exactly — so **an
+  existing room opens looking identical**.
+- Low-sun moods raise the environment fill rather than leaving the room half-black, and
+  `Overcast` carries almost all its light there.
+- Verified: **94 Rust tests + clippy clean** (scene-level default/set and
+  floor-wall-lighting independence; binding-level undo-reverts-lighting-without-touching-
+  the-finishes and out-of-range ordinal clamping). `tsc` clean. Drove the real app in
+  Chromium: create room → place a chair → all four moods → finish swap → undo,
+  **15/15 checks, no console errors**, with each mood asserted to render a
+  byte-distinct canvas rather than merely flipping a button.
+
+**Remains**
+
+- **Furniture casts no shadow on the floor, and this predates the change.** The renderer
+  is configured for it — `shadowMap.enabled`, `sun.castShadow`, five casters in the
+  scene, `floor.receiveShadow` — and dropping `environmentIntensity` to 0 does not
+  reveal one, so it is not fill washing it out. The M0 gate recorded shadows as passing,
+  so this drifted at some point since. **It blunts every preset here**, because mood in a
+  room is mostly shadow. Owned by the M3 lane, next after this.
+- **The four moods read as subtler than they should** for the same reason. The tints and
+  angles are hand-picked rather than derived from a sun position, and they were tuned on
+  one machine at one room size.
+- **No time-of-day slider and no per-light control** — four fixed presets, deliberately.
+  Artificial/interior lights (lamps as light sources rather than props) are absent.
+- **Camera framing — the last M3 item — is untouched.** It still only reframes to the
+  footprint on geometry change.
+- The verification screenshots were reviewed by eye; nothing pins the moods against
+  reference images, so a preset could drift without a test noticing.
+- Carried: per-wall material still waits on a `shell_mesh` split; walkway clearance,
+  door-swing arcs and furniture-vs-wall still open in M2; resize still wipes hand-added
+  walls and their openings; `front=+Z` unverified; thumbnails uncached; KTX2 unbuilt; no
+  redo; rotate/scale undo per-keypress; RoomPlan real-scan validation still owed; nothing
+  persists yet (M5); fps measured on one machine.
 
 ### M2: clearance warnings — furniture that overlaps says so · 2026-08-01
 

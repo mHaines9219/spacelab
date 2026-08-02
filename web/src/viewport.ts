@@ -22,6 +22,21 @@ const WALL_TILE_M = 2.5;
  */
 const WALL_TINTS = [0xf4f1ea, 0xd9dce0, 0xd6cec2, 0xb9c3b2, 0xc7ab9a];
 
+/**
+ * What each `LightingPreset` ordinal means. The document owns the choice; these are the
+ * renderer's interpretation of it. `env` fills the shadows (the IBL contribution), so
+ * low-sun moods raise it to keep the room readable rather than half-black, and Overcast
+ * carries almost all its light there. `sun` is metres in world space — height above the
+ * floor sets how long the shadows run.
+ * Index 0 reproduces the fixed sun the scene carried before lighting was selectable.
+ */
+const LIGHTING = [
+  { color: 0xffffff, intensity: 3.4, sun: [3.5, 6, 4.5], env: 0.55, sky: 0x14161a },
+  { color: 0xffd9a8, intensity: 2.9, sun: [6.5, 2.6, 3.0], env: 0.7, sky: 0x1a1a1d },
+  { color: 0xff9d5c, intensity: 2.4, sun: [-5.5, 1.9, 3.4], env: 0.62, sky: 0x1d1518 },
+  { color: 0xdfe6ef, intensity: 0.9, sun: [2.0, 7.5, 2.5], env: 1.35, sky: 0x1c1f23 },
+] as const;
+
 const textureLoader = new THREE.TextureLoader();
 
 function loadTexture(url: string, srgb: boolean, repeat: number) {
@@ -121,6 +136,8 @@ export type ViewportHandle = {
   setFloorMaterial: (index: number) => void;
   /** Choose the wall paint finish by index (matches Rust's WallMaterial ordinal). */
   setWallMaterial: (index: number) => void;
+  /** Choose the lighting mood by index (matches Rust's LightingPreset ordinal). */
+  setLighting: (index: number) => void;
   /** Replace the room with an axis-aligned rectangle (metres). */
   setRectangle: (widthM: number, depthM: number) => void;
   /** Replace the room with a closed polygon, `[x0, z0, x1, z1, …]` in metres. */
@@ -143,8 +160,8 @@ export type ViewportHandle = {
   setOpeningDimension: (axis: number, inches: number) => void;
   /**
    * Undo the last action, re-syncing the whole scene. Returns derived UI state to
-   * refresh (floor and wall finishes, room footprint), or null if there was nothing
-   * to undo.
+   * refresh (floor and wall finishes, lighting, room footprint), or null if there was
+   * nothing to undo.
    */
   undo: () => UndoResult | null;
 };
@@ -152,6 +169,7 @@ export type ViewportHandle = {
 export type UndoResult = {
   floorIndex: number;
   wallIndex: number;
+  lightingIndex: number;
   empty: boolean;
   room: { widthM: number; depthM: number } | null;
 };
@@ -180,11 +198,12 @@ export async function createViewport(
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x14161a);
+  // Both this and the environment intensity below are set from the lighting preset once
+  // `doc` is readable — see `applyLighting`.
+  scene.background = new THREE.Color();
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.55;
   pmrem.dispose();
 
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
@@ -194,7 +213,6 @@ export async function createViewport(
   controls.enableDamping = true;
 
   const sun = new THREE.DirectionalLight(0xffffff, 3.4);
-  sun.position.set(3.5, 6, 4.5);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.bias = -0.0004;
@@ -208,6 +226,18 @@ export async function createViewport(
   });
   sun.shadow.camera.updateProjectionMatrix();
   scene.add(sun);
+
+  // The choice lives in the Rust document; JS binds the matching look. Applied once at
+  // startup so the default preset is the single source of the opening lighting.
+  const applyLighting = (index: number) => {
+    const preset = LIGHTING[index];
+    sun.color.setHex(preset.color);
+    sun.intensity = preset.intensity;
+    sun.position.set(preset.sun[0], preset.sun[1], preset.sun[2]);
+    scene.environmentIntensity = preset.env;
+    (scene.background as THREE.Color).setHex(preset.sky);
+  };
+  applyLighting(doc.lighting());
 
   // Floor and walls each take a swappable finish, and stay two meshes so each carries
   // its own material. The floor swaps between pre-built materials (one texture set per
@@ -1009,6 +1039,10 @@ export async function createViewport(
     wallMaterial.color.setHex(WALL_TINTS[doc.set_wall_material(index)]);
   };
 
+  const setLighting = (index: number) => {
+    applyLighting(doc.set_lighting(index));
+  };
+
   return {
     dispose: () => {
       renderer.setAnimationLoop(null);
@@ -1026,6 +1060,7 @@ export async function createViewport(
     resetScale,
     setFloorMaterial,
     setWallMaterial,
+    setLighting,
     setRectangle: (widthM, depthM) => {
       doc.set_rectangle(widthM, depthM);
       showRoom();
@@ -1065,6 +1100,7 @@ export async function createViewport(
       if (openingMode) setAddOpening(null);
       floorMesh.material = floorMaterials[doc.floor_material()];
       wallMaterial.color.setHex(WALL_TINTS[doc.wall_material()]);
+      applyLighting(doc.lighting());
       reconcileFurnishings();
       reconcileOpenings();
       refreshBullpen();
@@ -1074,6 +1110,7 @@ export async function createViewport(
       return {
         floorIndex: doc.floor_material(),
         wallIndex: doc.wall_material(),
+        lightingIndex: doc.lighting(),
         empty: !hasRoom,
         room: hasRoom ? { widthM: maxX - minX, depthM: maxZ - minZ } : null,
       };
