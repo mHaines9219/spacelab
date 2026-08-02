@@ -39,6 +39,101 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### M1: resizing a room keeps the walls you drew · 2026-08-02
+
+**This clears the last item M1 was waiting on, and deliberately does not flip the flag.**
+Every item the milestone names is now in — 2D wall drawing with snapping, parametric doors
+and windows, extrusion to 3D, mitred junctions, room detection from the wall graph — and
+the data-loss defect inside its scope is fixed. The table still reads 🚧 because the
+milestone change belongs in its own PR where it can be reviewed on its own terms, not
+buried under a geometry fix. The two caveats at the top of **Remains** are what that PR
+has to argue past.
+
+**Accomplished**
+
+- **Resizing a room no longer destroys the walls someone added to it.** `set_rectangle`
+  rebuilt the wall list from scratch — `ClearWalls` then re-add — so every hand-added wall
+  and every opening on one vanished the moment a user nudged the width. Silent, immediate
+  data loss on a control the resize panel invites you to play with.
+- **The document now records who put a wall there.** New `WallOrigin { Generated, Drawn }`
+  on `Wall`. `Drawn` is `#[default]` **on purpose, and it is the safe direction**: a wall of
+  unknown provenance survives a regenerate. The opposite default would make every wall in
+  an older document "generated" and delete the user's work on the next resize — the exact
+  bug this type exists to fix, reintroduced through the back door. Duplicate walls are
+  ugly, visible and fixable by hand; deletion is not. Bumble's argument, and it is the one
+  that decides the default.
+- **Openings follow their own wall, not the operation.** New
+  `Command::ReplaceGeneratedWalls(Vec<Wall>)` drops only `Generated` walls and retains
+  openings by owning wall id, so a door on a hand-drawn wall is still there afterwards.
+  `ClearWalls` survives for genuinely starting over. A surviving wall stripped of its door
+  would have read as a *worse* bug than losing the wall outright, because it is selective —
+  which is why this is a retain-shaped command rather than clear-and-re-add.
+- **One monotonic wall-id allocator.** Ids came from two places that disagreed:
+  `build_room` numbered from the segment index, `add_wall` took `max + 1`. That only stayed
+  harmless because regenerating wiped everything first. The moment drawn walls survive, the
+  sequence *rectangle → delete a wall → add a wall → resize* hands out the same id twice,
+  and `wall(id)`, `openings_on(id)` and `delete_wall(id)` all key off it — a silent
+  wrong-wall bug, not a crash. Found by Bumble before it could ship. `Document.next_wall_id`
+  is now the single source, never reused, and **it is persisted state**: a save file has to
+  carry it or reloading restarts the counter on top of live ids.
+- Verified: **101 tests green across the workspace + clippy clean**, `tsc` clean. Five new
+  binding tests: the hand-added wall survives, its door survives with it, ids never collide
+  after the exact regenerate sequence above, a drawn wall survives four resizes in a row
+  without the generated walls accumulating copies, and undo puts back a wall a resize
+  replaced. Driven in the browser through the real UI — create room, *add wall* plus two
+  floor clicks, a door on that wall, then type a new width in the ROOM SIZE panel — against
+  `main` and this branch at identical steps: `main` goes **3 walls → 2 and 1 opening → 0**,
+  this branch holds **3 and 1**. Screenshots show the hand-drawn wall still standing after
+  the resize with its doorway cut into it.
+- **Three of those checks are committed to the browser suite** rather than left as another
+  throwaway driver. `room.spec.ts` gains the wall surviving a resize, its door surviving
+  with it, and a drawn wall surviving four consecutive resizes without the generated pair
+  duplicating; `addWallByHand` and `resizeWidthFeet` went into `tests/app.ts` with the
+  other page objects. The add-wall step drives the real two-click flow rather than a probe
+  — there is no probe for it, and the whole point of that wall is that only the real path
+  marks it `Drawn`. **Confirmed they bite:** with `build_room` temporarily put back to
+  `ClearWalls` + re-add, all three fail and the three pre-existing shell tests still pass,
+  so they are guards on this behaviour rather than tests that happen to be green.
+
+**Remains**
+
+- **Room detection has no UI.** `rooms(&scene)` is exposed on the binding and nothing on
+  screen shows it. The area readout ("1 room, 12.0 m²") is **approved and not built** — so
+  a future M1 ✅ would mean M1's stated scope is complete, not that what the walls enclose
+  is visible to a user. First thing owed against this milestone, and the strongest argument
+  against flipping the flag yet.
+- **Resize is still rectangle-only.** A drawn room cannot be resized by W × D without
+  destroying its shape, and `set_polygon` marks its walls `Generated`, so re-tracing a room
+  replaces them — correct, but it means "drawn" refers to the 3D add-wall flow, not to the
+  2D trace. The two senses of "drawn" are a naming trap for whoever adds polygon resize.
+- **`next_wall_id` is outside the undo snapshot,** deliberately, like `next_id` and
+  `next_opening_id` — undo does not recycle ids. Correct, and it means a long session with
+  many resizes climbs the counter. Harmless at `u32`, worth knowing before it is serialised.
+- **Nothing reconciles a drawn wall against the new footprint.** Resize a room smaller and a
+  hand-added wall can now be left standing outside the floor, because keeping it is the
+  whole point of this change. Previously it was deleted, which "hid" the problem. No warning
+  and no clamp — this is the deliberate trade, and it is the most likely thing to look wrong
+  to a user.
+- **`WallOrigin` has no `Imported` variant yet.** `RESEARCH/ROOMPLAN_SCHEMA_FIT.md` names an
+  imported wall as a genuine third origin. Left out because nothing imports yet; the enum
+  costs nothing to extend, which is why this is an enum rather than the `bool` first
+  proposed.
+- **Deleting a wall still leaves its door floating in mid-air, on `main` today.** Not this
+  PR's to fix and not fixed here — flagged because it *looks* fixed. PR #18 fixed it and was
+  merged into `ci-browser-suite` rather than `main`, and `main` had already taken that branch
+  at an earlier commit, so the fix never arrived: `git merge-base --is-ancestor 4623529
+  origin/main` is false, and `deleteSelectedWall` still calls `syncRoomGeometry()` +
+  `rebuildWallPicks()` with no `rebuildOpenings()`. `openings.spec.ts` pins it with
+  `test.fail(`, which is why the suite is correctly green and nothing raised an alarm. Being
+  re-landed directly on `main` in its own PR. **Lesson worth more than the fix: stacking a PR
+  on another branch let a merge consume its own base, and no test can see a fix that left.**
+- Carried: `__deleteWallById` hand-mirrors `deleteSelectedWall` rather than calling it, so
+  the two can drift — and today they share the bug above;
+  the staggered 0.3 m drop point overlaps a 1.96 m couch on every placement; `front=+Z`
+  unverified; thumbnails uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress;
+  RoomPlan USD round-trip (schema half answered, hardware half blocked); fps on one machine;
+  `cargo fmt` reports 13 diffs across the three crates, to be fixed in its own commit now
+  that the PRs holding those files have merged.
 ### Fix: a deleted wall no longer leaves its door hanging in mid-air (re-landed) · 2026-08-02
 
 **Accomplished**

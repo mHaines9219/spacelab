@@ -11,7 +11,7 @@ use core_geometry::{
 };
 use core_scene::{
     Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, LightingPreset, Opening,
-    OpeningId, OpeningKind, Placement, Scene, Wall, WallMaterial,
+    OpeningId, OpeningKind, Placement, Scene, Wall, WallId, WallMaterial, WallOrigin,
 };
 use glam::{Vec2, Vec3};
 use wasm_bindgen::prelude::*;
@@ -47,6 +47,10 @@ pub struct Document {
     next_id: FurnishingId,
     /// Next opening id to hand out. Monotonic; a separate namespace from furnishings.
     next_opening_id: OpeningId,
+    /// Next wall id to hand out. Monotonic and never reused, so a regenerated wall can
+    /// never collide with one the user drew. Persisted state — a save file has to carry
+    /// it, or reloading restarts the counter on top of live ids.
+    next_wall_id: WallId,
     /// The furnishing the furniture ops (drag/rotate/scale) act on. UI state, not
     /// document state, so it stays off the undo snapshots (which clone the Scene).
     selected: Option<FurnishingId>,
@@ -67,6 +71,7 @@ impl Document {
             history: Vec::new(),
             next_id: 1,
             next_opening_id: 1,
+            next_wall_id: 0,
             selected: None,
             selected_opening: None,
         };
@@ -147,35 +152,49 @@ impl Document {
         self.rebuild();
     }
 
-    /// Append a single wall between two ground points (metres), then rebuild.
+    /// Append a single wall between two ground points (metres), then rebuild. Hand-drawn,
+    /// so regenerating the room leaves it standing.
     pub fn add_wall(&mut self, sx: f32, sz: f32, ex: f32, ez: f32) {
         self.checkpoint();
-        let id = self.scene.walls.iter().map(|w| w.id).max().map_or(0, |m| m + 1);
-        self.scene.apply(Command::AddWall(Wall {
-            id,
-            start: Vec2::new(sx, sz),
-            end: Vec2::new(ex, ez),
-            thickness: WALL_THICKNESS,
-            height: WALL_HEIGHT,
-        }));
+        let wall = self.new_wall(Vec2::new(sx, sz), Vec2::new(ex, ez), WallOrigin::Drawn);
+        self.scene.apply(Command::AddWall(wall));
         self.rebuild();
     }
 
-    /// Rebuild the room from an explicit set of wall segments plus a floor outline.
-    /// The two are decoupled on purpose: the floor footprint is whatever `outline`
-    /// describes, independent of how many `segments` are raised, so a room can open
-    /// on one or more sides without reshaping its floor.
-    fn build_room(&mut self, segments: &[(Vec2, Vec2)], outline: &[Vec2]) {
-        self.scene.apply(Command::ClearWalls);
-        for (i, (start, end)) in segments.iter().enumerate() {
-            self.scene.apply(Command::AddWall(Wall {
-                id: i as u32,
-                start: *start,
-                end: *end,
-                thickness: WALL_THICKNESS,
-                height: WALL_HEIGHT,
-            }));
+    /// A wall with a freshly allocated id.
+    ///
+    /// Ids come from one monotonic counter and are never reused. They used to come from
+    /// two places that disagreed — `build_room` numbered from the segment index while
+    /// `add_wall` took `max + 1` — which only stayed harmless because regenerating wiped
+    /// everything first. The moment hand-drawn walls survive a regenerate, those two
+    /// allocators hand out the same id, and `wall`/`openings_on`/`delete_wall` all key
+    /// off it: a silent wrong-wall bug rather than a crash.
+    fn new_wall(&mut self, start: Vec2, end: Vec2, origin: WallOrigin) -> Wall {
+        let id = self.next_wall_id;
+        self.next_wall_id += 1;
+        Wall {
+            id,
+            start,
+            end,
+            thickness: WALL_THICKNESS,
+            height: WALL_HEIGHT,
+            origin,
         }
+    }
+
+    /// Regenerate the room's own walls from `segments`, and set the floor to `outline`.
+    ///
+    /// Two things are deliberately left alone. The floor footprint is whatever `outline`
+    /// describes, independent of how many `segments` are raised, so a room can open on one
+    /// or more sides without reshaping its floor. And **walls the user drew by hand stay
+    /// up** — only [`WallOrigin::Generated`] walls are replaced, so resizing a room no
+    /// longer destroys the walls someone added to it.
+    fn build_room(&mut self, segments: &[(Vec2, Vec2)], outline: &[Vec2]) {
+        let walls: Vec<Wall> = segments
+            .iter()
+            .map(|&(start, end)| self.new_wall(start, end, WallOrigin::Generated))
+            .collect();
+        self.scene.apply(Command::ReplaceGeneratedWalls(walls));
         // The floor footprint is stored on the document, so later wall edits leave it be.
         self.scene.apply(Command::SetFloorOutline(outline.to_vec()));
         // Furnishings persist across room edits; the web re-reads their transforms.
@@ -931,6 +950,88 @@ mod tests {
         assert_eq!(doc.wall_count(), 2);
         // …but the floor keeps the full 4×3 rectangular footprint.
         assert_eq!(doc.room_bounds(), vec![0.0, 0.0, 4.0, 3.0]);
+    }
+
+    // --- Resizing keeps what the user drew ---------------------------------
+
+    #[test]
+    fn resizing_a_room_keeps_the_walls_the_user_added() {
+        // The bug this fixes: `set_rectangle` rebuilt the wall list from scratch, so
+        // resizing silently destroyed every wall someone had added by hand.
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_wall(4.0, 0.0, 4.0, 3.0);
+        assert_eq!(doc.wall_count(), 3);
+
+        doc.set_rectangle(5.0, 3.0);
+
+        // Two regenerated walls plus the hand-drawn one, which is still where it was.
+        assert_eq!(doc.wall_count(), 3);
+        let segments = doc.wall_segments();
+        assert!(
+            segments.chunks(4).any(|s| s == [4.0, 0.0, 4.0, 3.0]),
+            "the hand-added wall is gone: {segments:?}"
+        );
+        assert_eq!(doc.room_bounds(), vec![0.0, 0.0, 5.0, 3.0]);
+    }
+
+    #[test]
+    fn resizing_keeps_a_door_on_a_hand_added_wall() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_wall(4.0, 0.0, 4.0, 3.0);
+        let drawn = *doc.wall_ids().last().unwrap();
+        assert!(doc.add_opening(0, drawn, 4.0, 1.5) >= 0);
+        assert_eq!(doc.opening_ids().len(), 1);
+
+        doc.set_rectangle(5.0, 3.0);
+
+        // Losing the door while keeping its wall would be a worse bug than the original.
+        assert_eq!(doc.opening_ids().len(), 1, "the surviving wall lost its door");
+    }
+
+    #[test]
+    fn wall_ids_never_collide_after_a_regenerate() {
+        // Two allocators used to disagree — `build_room` numbered from the segment index
+        // while `add_wall` took `max + 1` — and only the wholesale wipe hid it. This is
+        // the exact sequence that produced two walls sharing an id, which `wall(id)`,
+        // `openings_on(id)` and `delete_wall(id)` would all then resolve to the wrong one.
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0); // ids 0, 1
+        doc.delete_wall(doc.wall_ids()[1]); // drop one, so max() falls back
+        doc.add_wall(4.0, 0.0, 4.0, 3.0); // used to take max + 1 = 1
+        doc.set_rectangle(5.0, 3.0); // used to regenerate as 0, 1
+
+        let mut ids = doc.wall_ids();
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "duplicate wall ids: {ids:?}");
+    }
+
+    #[test]
+    fn a_hand_added_wall_survives_repeated_resizes() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_wall(4.0, 0.0, 4.0, 3.0);
+        for width in [5.0, 6.0, 3.5, 4.0] {
+            doc.set_rectangle(width, 3.0);
+        }
+        // Still exactly one drawn wall and two generated ones — regenerating neither
+        // deletes the drawn wall nor accumulates copies of the generated ones.
+        assert_eq!(doc.wall_count(), 3);
+    }
+
+    #[test]
+    fn undo_puts_back_a_wall_that_a_resize_replaced() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_wall(4.0, 0.0, 4.0, 3.0);
+        let before = doc.wall_segments();
+        doc.set_rectangle(9.0, 9.0);
+        assert_ne!(doc.wall_segments(), before);
+        assert!(doc.undo());
+        assert_eq!(doc.wall_segments(), before);
     }
 
     #[test]

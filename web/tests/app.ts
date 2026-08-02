@@ -43,6 +43,38 @@ export async function undo(page: Page) {
 }
 
 /**
+ * Add a wall by hand through the real add-wall flow: arm the mode, then two floor
+ * clicks. There is deliberately no probe for this — the whole point of the wall it
+ * creates is that it is `WallOrigin::Drawn`, and only this path produces one.
+ *
+ * The two points are fractions of the canvas rather than pixels, since the camera
+ * frames the footprint and the viewport size is a config detail. They sit well inside
+ * the floor of a default room so the raycast lands on it rather than on a wall.
+ */
+export async function addWallByHand(page: Page) {
+  const before = await probe(page, "__wallCount");
+  await page.getByRole("button", { name: "add wall" }).click();
+  const canvas = page.locator("canvas");
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("canvas has no bounding box");
+  const click = (fx: number, fy: number) =>
+    page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+  await click(0.44, 0.66);
+  await click(0.64, 0.52);
+  await expect.poll(() => probe(page, "__wallCount")).toBe(before + 1);
+}
+
+/**
+ * Retype the room's width in feet and commit with Enter — the same path a user takes,
+ * and the one that used to wipe every hand-added wall.
+ */
+export async function resizeWidthFeet(page: Page, feet: number) {
+  const width = page.locator(".room label.row", { hasText: "width" }).locator("input").first();
+  await width.fill(String(feet));
+  await width.press("Enter");
+}
+
+/**
  * Hide every floating overlay so a screenshot shows the 3D scene alone. Only affects
  * presentation — the scene and the probes are untouched.
  */

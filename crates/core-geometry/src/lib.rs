@@ -312,7 +312,7 @@ pub fn resolve_placement(scene: &Scene, asset: &Asset, cursor: Vec2, radius: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_scene::{Command, OpeningKind, WallId};
+    use core_scene::{Command, OpeningKind, WallId, WallOrigin};
 
     const CHAIR: Asset = Asset {
         extent: Vec3::new(0.83, 0.69, 0.57),
@@ -327,6 +327,7 @@ mod tests {
                 end: Vec2::new(4.2, 0.0),
                 thickness: 0.12,
                 height: 2.5,
+                origin: WallOrigin::Drawn,
             },
             Wall {
                 id: 1,
@@ -334,6 +335,7 @@ mod tests {
                 end: Vec2::new(0.0, 3.4),
                 thickness: 0.12,
                 height: 2.5,
+                origin: WallOrigin::Drawn,
             },
         ] {
             scene.apply(Command::AddWall(wall));
@@ -459,6 +461,7 @@ mod tests {
             end: Vec2::new(0.6, 0.0),
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }));
         // Cursor past the far end; a 0.9-wide opening can't fit a 0.6 wall, so it centres.
         let along = seat_opening(&scene.walls[0], Vec2::new(5.0, 0.0), 0.9);
@@ -533,6 +536,7 @@ mod tests {
             end,
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }
     }
 
@@ -720,6 +724,7 @@ mod tests {
                 end: corners[(i + 1) % 4],
                 thickness: 0.12,
                 height: 2.5,
+                origin: WallOrigin::Drawn,
             }));
         }
         scene.apply(Command::SetFloorOutline(corners));
@@ -792,6 +797,7 @@ mod tests {
                 end: corners[(i + 1) % 6],
                 thickness: 0.12,
                 height: 2.5,
+                origin: WallOrigin::Drawn,
             }));
         }
         scene.apply(Command::SetFloorOutline(corners));
@@ -878,6 +884,7 @@ mod tests {
             end: Vec2::new(0.4, 0.0),
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }));
         let placement = resolve_placement(&scene, &CHAIR, Vec2::new(0.35, 0.3), 0.35);
         assert!((placement.position.x - 0.2).abs() < 1e-5);

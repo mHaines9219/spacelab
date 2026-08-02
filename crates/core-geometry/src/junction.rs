@@ -153,6 +153,7 @@ pub fn mitre_walls(scene: &Scene) -> Vec<WallEnds> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core_scene::WallOrigin;
     use core_scene::Command;
 
     fn wall(id: u32, start: Vec2, end: Vec2) -> Wall {
@@ -162,6 +163,7 @@ mod tests {
             end,
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }
     }
 
