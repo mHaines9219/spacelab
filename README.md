@@ -17,8 +17,10 @@ binding: mutations flow through Rust commands, and any wall edit re-emits geomet
 the web layer re-uploads. You can add and delete individual walls by clicking them in
 3D, drop **parametric doors and windows that snap onto walls** (they cut the wall and
 ride along it), **set a furnishing aside into a bullpen** and re-import it later with its
-size and rotation intact, and **Cmd/Ctrl+Z undoes any action**. Still open in M1: mitred
-junctions, and room detection from the wall graph (multi-room / branching layouts).
+size and rotation intact, and **Cmd/Ctrl+Z undoes any action**. Wall corners are **mitred**,
+so they close instead of overlapping, and the walls are read as a graph to find **which
+areas they actually enclose** — multi-room and branching layouts included. Still open in M1:
+resizing a room rebuilds it from scratch, which wipes any wall you added by hand.
 
 ### M0 gate results
 

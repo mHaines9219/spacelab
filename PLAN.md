@@ -26,7 +26,8 @@
 
 Updated at the end of every PR — see [Keeping this section current](#keeping-this-section-current). Newest entry first.
 
-**Now: M1 — Floorplan & shell.** MVP is M0–M4.
+**Now: M1 — Floorplan & shell.** MVP is **M0–M3 + M5** — [amended 2026-08-01](#milestones)
+on the owner's ruling; M4 moves after MVP and persistence moves into it.
 
 | Milestone | State |
 |---|---|
@@ -469,7 +470,21 @@ Throwaway code proving the whole seam: Rust→WASM emits wall geometry for two h
 
 **M6+ — Expansion.** Android capture (ARCore + corner-tap), native desktop shell (`wgpu`), cloud final-render, AI assist, collaboration, brand catalog.
 
-**MVP = M0–M4.** M5 is close behind and arguably part of it, since a design nobody can share is a design nobody talks about.
+**MVP = M0–M3 + M5.** Amended 2026-08-01 (was M0–M4) on the project owner's ruling —
+verbatim, 2026-08-02T00:31:55Z: *"yes skip to M5, lidar, and apple account are not set up,
+but saving and loading are MVP."* **M4 moves after MVP and save/load is in it.** Two
+reasons stand behind the call. First,
+**nothing persists** — there is no serialization anywhere in the tree, so a reload eats the
+room, the walls and the bullpen, which makes the [Verification](#verification) thesis test
+(hand the build to someone who has never used Blender and watch them lay out their bedroom)
+much weaker than it should be. Second, **M4 is hardware-blocked** without a device or an
+account, and account provisioning has lead time the [risk table](#risks) says to start
+during M3 regardless.
+
+The RoomPlan *schema* round-trip is not hardware-blocked and does not move: a synthetic
+export against Apple's published `CapturedRoom` shape answers the structural question
+without a device. It leaves the MVP path but stays owed — see
+[Verification](#verification).
 
 ## Deliberately deferred
 
