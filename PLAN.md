@@ -39,6 +39,39 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### CI: the unit layer is gated, not just present · 2026-08-02
+
+**Accomplished**
+
+- **`vitest` runs on every PR as its own job.** `npm run test:unit` arrived with the boot
+  guard, but nothing ran it — 17 unit tests were in the tree and gating nothing. A test
+  suite that exists and is not enforced is a suite people stop trusting the moment one
+  goes red without consequence.
+- **Its own job rather than a step inside `tsc + browser suite`.** These tests need no
+  WASM, no browser and no catalog, so they answer in seconds instead of queueing behind a
+  ~9 minute browser run. They also cover the branches a real browser cannot be made to
+  reach on demand — storage throwing the way Safari private mode does, quota exhaustion,
+  and a safety net that failed to write and has to say so.
+- **Deliberately advisory for now.** It is not yet in the required-checks list: adding a
+  required context while the M5 wiring PR is in flight would block a green critical-path
+  PR for an infrastructure reason. The job runs and reports on every PR from here; the
+  enforcement flip is a one-line API call the moment the wiring lands.
+
+**Remains**
+
+- **The unit layer covers one module.** `persistence.ts` and the binding guard have tests;
+  nothing else in `web/src/` does. That is the honest state — this job enforces what
+  exists, it does not imply coverage.
+- **The enforcement flip is owed, not done.** Until it happens a red `vitest` job does not
+  stop a merge, which is the same advisory-guard problem that let a `PLAN.md` entry vanish
+  four seconds before its own check went red this morning.
+- **Four required checks today, five after the flip, and the browser suite is ~9 minutes of
+  them.** Every PR pays that before it can merge. Sharding is the lever when it stops being tolerable, and
+  nothing about it has changed today.
+- Carried: `cargo fmt` still ungated and the tree still not `rustfmt`-clean — the window is
+  open now that the Rust queue has drained, and it is next; concurrent local suite runs
+  still contend; a real-LiDAR RoomPlan round-trip is still owed.
+
 ### M5: the save format — document to JSON and back · 2026-08-02
 
 **Accomplished**

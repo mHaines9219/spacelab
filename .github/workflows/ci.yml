@@ -23,6 +23,25 @@ jobs:
       # keep it that way is to refuse the first warning rather than the hundredth.
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  unit:
+    name: vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      # Its own job rather than a step in `web`: these tests need no WASM, no browser and
+      # no catalog, so they answer in seconds instead of waiting behind a ~9 minute
+      # browser suite. They also cover the branches a browser cannot reach on demand —
+      # storage throwing, quota exhaustion, a safety net that failed to write.
+      - run: npm run test:unit
+        working-directory: web
+
   web:
     name: tsc + browser suite
     runs-on: ubuntu-latest
