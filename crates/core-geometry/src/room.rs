@@ -201,7 +201,7 @@ pub fn rooms(scene: &Scene) -> Vec<Room> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_scene::{Command, Wall};
+    use core_scene::{Command, Wall, WallOrigin};
 
     fn walls_of(points: &[(f32, f32)], edges: &[(usize, usize)]) -> Scene {
         let mut scene = Scene::default();
@@ -212,6 +212,7 @@ mod tests {
                 end: Vec2::new(points[b].0, points[b].1),
                 thickness: 0.12,
                 height: 2.5,
+                origin: WallOrigin::Drawn,
             }));
         }
         scene
@@ -266,6 +267,7 @@ mod tests {
             end: Vec2::ZERO,
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }));
         assert_eq!(rooms(&scene).len(), 1);
     }
@@ -336,6 +338,7 @@ mod tests {
             end: Vec2::new(1.0, 1.0),
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }));
         let rooms = rooms(&scene);
         assert_eq!(rooms.len(), 1);
@@ -388,6 +391,7 @@ mod tests {
             end: Vec2::new(2.0, 1.0),
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }));
         let rooms = rooms(&scene);
         assert_eq!(rooms.len(), 1);

@@ -6,6 +6,22 @@ pub type WallId = u32;
 pub type FurnishingId = u32;
 pub type OpeningId = u32;
 
+/// Who put a wall there. The distinction exists so regenerating the room — resizing a
+/// rectangle, say — can replace what the app generated without destroying what the user
+/// drew. See [`Command::ReplaceGeneratedWalls`].
+///
+/// `Drawn` is the default on purpose, and it is the safe direction: a wall of unknown
+/// provenance survives a regenerate. The opposite default would silently delete a user's
+/// walls the first time they resized a room — which is the bug this type exists to fix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum WallOrigin {
+    /// Raised by the app from a rectangle or a traced outline. Regenerating replaces it.
+    Generated,
+    /// Added by hand in the 3D view. Regenerating leaves it alone.
+    #[default]
+    Drawn,
+}
+
 /// Ground-plane coordinates are metres as `Vec2(x, z)`; `Vec3` is `(x, up, z)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Wall {
@@ -14,6 +30,7 @@ pub struct Wall {
     pub end: Vec2,
     pub thickness: f32,
     pub height: f32,
+    pub origin: WallOrigin,
 }
 
 impl Wall {
@@ -181,8 +198,17 @@ pub struct Scene {
 pub enum Command {
     AddWall(Wall),
     DeleteWall(WallId),
-    /// Remove every wall — used when regenerating a room from scratch.
+    /// Remove every wall and every opening. The blunt instrument — only for genuinely
+    /// starting over. Regenerating a room wants [`Command::ReplaceGeneratedWalls`].
     ClearWalls,
+    /// Drop the walls this app generated and put `walls` in their place, leaving every
+    /// [`WallOrigin::Drawn`] wall standing.
+    ///
+    /// Openings follow their own wall rather than the operation: a door on a hand-drawn
+    /// wall survives, a door on a replaced wall goes with it. Clearing openings wholesale
+    /// — as `ClearWalls` does — would leave a surviving wall stripped of its door, which
+    /// reads as a worse bug than losing the wall outright because it is selective.
+    ReplaceGeneratedWalls(Vec<Wall>),
     AddOpening(Opening),
     RemoveOpening(OpeningId),
     /// Slide an opening to a new centre position along its wall. Leaves size untouched.
@@ -246,6 +272,19 @@ impl Scene {
             Command::ClearWalls => {
                 self.walls.clear();
                 self.openings.clear();
+            }
+            Command::ReplaceGeneratedWalls(walls) => {
+                // Take the openings out with their own walls, not with the operation, so
+                // a door on a hand-drawn wall is still there afterwards.
+                let dropped: Vec<WallId> = self
+                    .walls
+                    .iter()
+                    .filter(|w| w.origin == WallOrigin::Generated)
+                    .map(|w| w.id)
+                    .collect();
+                self.walls.retain(|w| w.origin != WallOrigin::Generated);
+                self.openings.retain(|o| !dropped.contains(&o.wall));
+                self.walls.extend(walls);
             }
             Command::AddOpening(opening) => self.openings.push(opening),
             Command::RemoveOpening(id) => self.openings.retain(|o| o.id != id),
@@ -472,6 +511,7 @@ mod tests {
             end: Vec2::new(4.0, 0.0),
             thickness: 0.12,
             height: 2.5,
+            origin: WallOrigin::Drawn,
         }
     }
 
@@ -526,6 +566,72 @@ mod tests {
 
         scene.apply(Command::ClearWalls);
         assert!(scene.openings.is_empty());
+    }
+
+    /// A wall of the given origin, so the two can be mixed in one scene.
+    fn wall_from(id: WallId, origin: WallOrigin) -> Wall {
+        Wall { origin, ..wall(id) }
+    }
+
+    #[test]
+    fn regenerating_replaces_generated_walls_and_leaves_drawn_ones_standing() {
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(wall_from(0, WallOrigin::Generated)));
+        scene.apply(Command::AddWall(wall_from(1, WallOrigin::Drawn)));
+
+        scene.apply(Command::ReplaceGeneratedWalls(vec![
+            wall_from(2, WallOrigin::Generated),
+            wall_from(3, WallOrigin::Generated),
+        ]));
+
+        // Wall 0 went, wall 1 — the hand-drawn one — did not.
+        let ids: Vec<WallId> = scene.walls.iter().map(|w| w.id).collect();
+        assert_eq!(ids, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn regenerating_keeps_a_door_on_a_wall_the_user_drew() {
+        // The half-fix this guards against: surviving the wall but losing its door is
+        // worse than losing both, because it is selective and looks like corruption.
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(wall_from(0, WallOrigin::Generated)));
+        scene.apply(Command::AddWall(wall_from(1, WallOrigin::Drawn)));
+        scene.apply(Command::AddOpening(door(10, 0))); // on the generated wall
+        scene.apply(Command::AddOpening(door(11, 1))); // on the drawn wall
+
+        scene.apply(Command::ReplaceGeneratedWalls(vec![wall_from(
+            2,
+            WallOrigin::Generated,
+        )]));
+
+        // The door on the replaced wall went with it; the one on the drawn wall stayed.
+        assert!(scene.opening(10).is_none());
+        assert!(scene.opening(11).is_some());
+        assert_eq!(scene.openings_on(1).count(), 1);
+    }
+
+    #[test]
+    fn regenerating_an_all_drawn_room_removes_nothing() {
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(wall_from(0, WallOrigin::Drawn)));
+        scene.apply(Command::AddOpening(door(10, 0)));
+        scene.apply(Command::ReplaceGeneratedWalls(Vec::new()));
+        assert_eq!(scene.walls.len(), 1);
+        assert!(scene.opening(10).is_some());
+    }
+
+    #[test]
+    fn a_wall_of_unknown_origin_defaults_to_surviving() {
+        // The safe direction, and the whole reason `Drawn` is the default: a wall from a
+        // save file written before this field existed must not be deleted by a resize.
+        assert_eq!(WallOrigin::default(), WallOrigin::Drawn);
+        let mut scene = Scene::default();
+        scene.apply(Command::AddWall(Wall {
+            origin: WallOrigin::default(),
+            ..wall(7)
+        }));
+        scene.apply(Command::ReplaceGeneratedWalls(Vec::new()));
+        assert_eq!(scene.walls.len(), 1, "a default-origin wall was destroyed");
     }
 
     #[test]
