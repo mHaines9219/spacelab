@@ -65,6 +65,14 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
   watcher, so an undone edit would come back on reload. History policy is deliberately
   *not* in that funnel: `undo` must keep the rest of the stack and `load` must clear it,
   so putting `history.clear()` there would silently make undo one step deep.
+- **`furnishing_asset_id(id)` reads the catalog id back**, because storing it was only
+  half the fix. The id was write-only across the boundary — `add_furnishing` took it and
+  nothing returned it — so a restore would still have produced correctly-sized invisible
+  boxes. Caught by Honey checking the generated `.d.ts` rather than the Rust source, which
+  is the only surface that says what JS can actually call. By id rather than a list
+  parallel to `furnishing_ids()`: that list is placed furnishings only, so a parallel array
+  would rebuild the room and leave the bullpen full of unidentifiable thumbnails — the same
+  failure, one panel over.
 - **`revision` is not persisted.** The byte-identity test caught this: the same room saved
   after three edits and after three hundred produced different files. It is session-local
   change detection, not part of the room, and on load the counter advances from the current
@@ -88,6 +96,11 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 
 - **Nothing calls this yet.** The web half — autosave, boot restore, import/export — is
   Honey's and lands separately. Until it does, the format is exercised only by its tests.
+- **`save_json` / `load_json` / `revision` are not yet in the stale-binding guard's list.**
+  They belong there, added in the commit that adds the methods so the list can never
+  describe a future — but `binding-guard.ts` arrives with #22, so this is owed the moment
+  that lands. Listing them before the methods existed would have refused to boot on every
+  healthy tree, which is the trap Honey caught in my own sample.
 - **`add_furnishing` changed signature** to take the catalog id first. `viewport.ts` must
   pass `entry.asset_id`; that wiring is in the web half.
 - **f32 in JSON is noisy** (`0.30000001192092896`). Accepted deliberately: exact

@@ -573,6 +573,21 @@ impl Document {
         self.transform(id)
     }
 
+    /// Which catalog entry a furnishing is, e.g. `"couch-medium"`. Empty for an unknown
+    /// id rather than a panic, since this is reachable from JS with any number.
+    ///
+    /// By id rather than a list parallel to `furnishing_ids()`, because that list is
+    /// **placed furnishings only** — the bullpen is a separate list, and a restore has to
+    /// identify both. A parallel array would rebuild the room correctly and leave the
+    /// bullpen full of unidentifiable thumbnails: the same invisible-box failure, one
+    /// panel over.
+    pub fn furnishing_asset_id(&self, id: u32) -> String {
+        self.scene
+            .furnishing(id)
+            .map(|f| f.asset.asset_id.clone())
+            .unwrap_or_default()
+    }
+
     /// Ids of furnishings set aside in the bullpen, in stash order — the web maps each
     /// to its catalog entry to draw a tray card.
     pub fn stashed_ids(&self) -> Vec<u32> {
@@ -1497,15 +1512,41 @@ mod tests {
         let mut restored = Document::new();
         restored.load_document(&doc.save_json()).unwrap();
 
-        // The whole reason `Asset` carries a catalog id: without it a reload gives back
-        // correctly-sized invisible boxes and nothing errors.
+        // Deliberately through the JS-callable surface, not `restored.scene`. Reading the
+        // field directly proves the data survived the round trip and says nothing about
+        // whether the web layer can reach it — which is exactly the gap that let the
+        // association live in a JavaScript `Map` unnoticed in the first place.
         let ids: Vec<String> = restored
-            .scene
-            .furnishings
-            .iter()
-            .map(|f| f.asset.asset_id.clone())
+            .furnishing_ids()
+            .into_iter()
+            .map(|id| restored.furnishing_asset_id(id))
             .collect();
         assert_eq!(ids, vec!["sheen-chair".to_string(), "couch-medium".to_string()]);
+    }
+
+    #[test]
+    fn a_stashed_furnishing_keeps_its_catalog_entry_across_a_reload() {
+        let mut doc = furnished_room();
+        let stashed = doc.stash_selected();
+        assert!(stashed >= 0, "something was selected to stash");
+
+        let mut restored = Document::new();
+        restored.load_document(&doc.save_json()).unwrap();
+
+        // The bullpen is a separate list from `furnishing_ids()`, so a parallel array
+        // would restore the room and leave the tray full of unidentifiable cards.
+        assert_eq!(restored.stashed_ids(), vec![stashed as u32]);
+        assert_eq!(
+            restored.furnishing_asset_id(stashed as u32),
+            "couch-medium",
+            "a set-aside item must come back knowing what it is"
+        );
+    }
+
+    #[test]
+    fn an_unknown_furnishing_id_is_empty_rather_than_a_panic() {
+        // Reachable from JS with any number.
+        assert_eq!(Document::new().furnishing_asset_id(9999), "");
     }
 
     #[test]
