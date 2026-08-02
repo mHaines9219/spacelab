@@ -1,5 +1,9 @@
 //! Turns the scene document into meshes: prismatic wall extrusion, triangulation, snapping and clearance queries.
 
+mod junction;
+
+pub use junction::{WallEnds, mitre_walls};
+
 use core_scene::{Anchor, Asset, Opening, Placement, Scene, Wall};
 use glam::{Vec2, Vec3};
 
@@ -63,16 +67,16 @@ fn cut_span(wall: &Wall, opening: &Opening) -> Option<(f32, f32)> {
     (a1 - a0 > EPS).then_some((a0, a1))
 }
 
-pub fn wall_mesh(wall: &Wall, openings: &[Opening], out: &mut MeshBuffers) {
-    let offset = wall.normal() * wall.thickness * 0.5;
-    let footprint = [
-        wall.start - offset,
-        wall.end - offset,
-        wall.end + offset,
-        wall.start + offset,
-    ];
-    let low = footprint.map(|p| ground(p, 0.0));
-    let high = footprint.map(|p| ground(p, wall.height));
+pub fn wall_mesh(wall: &Wall, openings: &[Opening], ends: WallEnds, out: &mut MeshBuffers) {
+    // Corner order matches the old square footprint: start and end on side -1, then end
+    // and start on side +1. Mitring only slides each corner along the centreline, so the
+    // winding — and every face below — is unchanged.
+    let footprint = [(-1.0, false), (-1.0, true), (1.0, true), (1.0, false)].map(|(s, far)| {
+        let (near, end) = ends.face_span(s);
+        (if far { end } else { near }, s)
+    });
+    let low = footprint.map(|(a, s)| face_point(wall, a, 0.0, s));
+    let high = footprint.map(|(a, s)| face_point(wall, a, wall.height, s));
 
     // Cap and end-cap faces are unaffected by openings (which never reach the wall ends
     // or its full height): bottom, top, and the two end caps stay solid.
@@ -91,8 +95,8 @@ pub fn wall_mesh(wall: &Wall, openings: &[Opening], out: &mut MeshBuffers) {
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
         v
     };
-    emit_face(wall, -1.0, &cuts, out);
-    emit_face(wall, 1.0, &cuts, out);
+    emit_face(wall, -1.0, ends, &cuts, out);
+    emit_face(wall, 1.0, ends, &cuts, out);
     for &(a0, a1, o) in &cuts {
         emit_reveals(wall, a0, a1, o, out);
     }
@@ -108,8 +112,18 @@ fn face_point(wall: &Wall, a: f32, y: f32, s: f32) -> Vec3 {
 
 /// Emit one long face (side `s`) as solid strips between and above/below each opening,
 /// leaving the openings as holes. Winding flips with the side so both faces point out.
-fn emit_face(wall: &Wall, s: f32, cuts: &[(f32, f32, &Opening)], out: &mut MeshBuffers) {
-    let len = wall.length();
+///
+/// The face runs corner to corner rather than `0..length`: a mitred end leaves one side
+/// longer than the centreline and the other shorter. Openings stay on the centreline, so
+/// they are untouched by this.
+fn emit_face(
+    wall: &Wall,
+    s: f32,
+    ends: WallEnds,
+    cuts: &[(f32, f32, &Opening)],
+    out: &mut MeshBuffers,
+) {
+    let (near, far) = ends.face_span(s);
     let height = wall.height;
     let quad = |out: &mut MeshBuffers, a0: f32, a1: f32, y0: f32, y1: f32| {
         if a1 - a0 <= EPS || y1 - y0 <= EPS {
@@ -123,7 +137,7 @@ fn emit_face(wall: &Wall, s: f32, cuts: &[(f32, f32, &Opening)], out: &mut MeshB
         }
     };
 
-    let mut cursor = 0.0;
+    let mut cursor = near;
     for &(a0, a1, o) in cuts {
         let (sill, head) = (o.sill.max(0.0), o.head().min(height));
         quad(out, cursor, a0, 0.0, height); // full-height wall before the opening
@@ -131,7 +145,7 @@ fn emit_face(wall: &Wall, s: f32, cuts: &[(f32, f32, &Opening)], out: &mut MeshB
         quad(out, a0, a1, head, height); // strip above the head
         cursor = a1;
     }
-    quad(out, cursor, len, 0.0, height); // wall after the last opening
+    quad(out, cursor, far, 0.0, height); // wall after the last opening
 }
 
 /// Line the hole through the wall's thickness: sill, head, and the two jambs. Each reveal
@@ -252,9 +266,9 @@ fn triangulate(poly: &[Vec2]) -> Vec<[usize; 3]> {
 pub fn shell_mesh(scene: &Scene) -> MeshBuffers {
     let mut out = MeshBuffers::default();
     floor_mesh(scene, &mut out);
-    for wall in &scene.walls {
+    for (wall, ends) in scene.walls.iter().zip(mitre_walls(scene)) {
         let openings: Vec<Opening> = scene.openings_on(wall.id).copied().collect();
-        wall_mesh(wall, &openings, &mut out);
+        wall_mesh(wall, &openings, ends, &mut out);
     }
     out
 }
@@ -344,7 +358,8 @@ mod tests {
     #[test]
     fn wall_extrudes_to_a_closed_box() {
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&corner_room().walls[0], &[], &mut mesh);
+        let wall = corner_room().walls[0];
+        wall_mesh(&wall, &[], WallEnds::square(&wall), &mut mesh);
         assert_eq!(mesh.vertex_count(), 24);
         assert_eq!(mesh.triangle_count(), 12);
     }
@@ -379,7 +394,7 @@ mod tests {
         let wall = corner_room().walls[0]; // along +X, 4.2 long
         let door = opening(0, OpeningKind::Door, 2.1, 0.0);
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&wall, &[door], &mut mesh);
+        wall_mesh(&wall, &[door], WallEnds::square(&wall), &mut mesh);
         let (a0, a1) = door.span();
         for q in quads(&mesh) {
             let c = q.iter().copied().sum::<Vec3>() / 4.0;
@@ -397,7 +412,8 @@ mod tests {
         // after) = 3, so 2 caps + 2 ends + 6 face strips = 10, plus head + 2 jambs = 13.
         let wall = corner_room().walls[0];
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&wall, &[opening(0, OpeningKind::Door, 2.1, 0.0)], &mut mesh);
+        let door = opening(0, OpeningKind::Door, 2.1, 0.0);
+        wall_mesh(&wall, &[door], WallEnds::square(&wall), &mut mesh);
         assert_eq!(mesh.vertex_count() / 4, 13);
     }
 
@@ -407,7 +423,8 @@ mod tests {
         // (+1): 13 + 3 = 16 quads.
         let wall = corner_room().walls[0];
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&wall, &[opening(0, OpeningKind::Window, 2.1, 0.9)], &mut mesh);
+        let window = opening(0, OpeningKind::Window, 2.1, 0.9);
+        wall_mesh(&wall, &[window], WallEnds::square(&wall), &mut mesh);
         assert_eq!(mesh.vertex_count() / 4, 16);
     }
 
@@ -416,7 +433,7 @@ mod tests {
         let wall = corner_room().walls[0];
         let win = opening(0, OpeningKind::Window, 2.1, 0.9);
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&wall, &[win], &mut mesh);
+        wall_mesh(&wall, &[win], WallEnds::square(&wall), &mut mesh);
         // The opening's centre point on the wall centreline; reveal normals should point
         // roughly towards it (sill up, head down, jambs inward).
         let centre = Vec3::new(win.along, win.sill + win.height * 0.5, 0.0);
@@ -461,7 +478,7 @@ mod tests {
     fn wall_face_normals_point_away_from_the_centre() {
         for wall in corner_room().walls {
             let mut mesh = MeshBuffers::default();
-            wall_mesh(&wall, &[], &mut mesh);
+            wall_mesh(&wall, &[], WallEnds::square(&wall), &mut mesh);
             let centre = Vec3::new(
                 (wall.start.x + wall.end.x) * 0.5,
                 wall.height * 0.5,
@@ -481,12 +498,208 @@ mod tests {
     fn wall_spans_its_thickness_and_height() {
         let wall = corner_room().walls[0];
         let mut mesh = MeshBuffers::default();
-        wall_mesh(&wall, &[], &mut mesh);
+        wall_mesh(&wall, &[], WallEnds::square(&wall), &mut mesh);
         let zs: Vec<f32> = mesh.positions.chunks(3).map(|v| v[2]).collect();
         let ys: Vec<f32> = mesh.positions.chunks(3).map(|v| v[1]).collect();
         assert!((zs.iter().cloned().fold(f32::MIN, f32::max) - 0.06).abs() < 1e-5);
         assert!((zs.iter().cloned().fold(f32::MAX, f32::min) + 0.06).abs() < 1e-5);
         assert_eq!(ys.iter().cloned().fold(f32::MIN, f32::max), wall.height);
+    }
+
+    // --- Mitred junctions --------------------------------------------------
+
+    /// A wall's four ground corners, read back out of the emitted mesh (the bottom cap
+    /// is the first quad `wall_mesh` writes, and it *is* the footprint) so these tests
+    /// assert on the geometry that actually ships rather than on the solver's internals.
+    fn footprint(scene: &Scene, index: usize) -> [Vec2; 4] {
+        let wall = scene.walls[index];
+        let ends = mitre_walls(scene)[index];
+        let mut mesh = MeshBuffers::default();
+        wall_mesh(&wall, &[], ends, &mut mesh);
+        std::array::from_fn(|i| Vec2::new(mesh.positions[i * 3], mesh.positions[i * 3 + 2]))
+    }
+
+    fn assert_near(a: Vec2, b: Vec2, what: &str) {
+        assert!(a.distance(b) < 1e-4, "{what}: {a} != {b}");
+    }
+
+    /// A wall with nothing to meet keeps the square footprint it always had.
+    fn lone_wall(start: Vec2, end: Vec2) -> Wall {
+        Wall {
+            id: 0,
+            start,
+            end,
+            thickness: 0.12,
+            height: 2.5,
+        }
+    }
+
+    fn scene_of(walls: &[Wall]) -> Scene {
+        let mut scene = Scene::default();
+        for wall in walls {
+            scene.apply(Command::AddWall(*wall));
+        }
+        scene
+    }
+
+    #[test]
+    fn a_right_angle_corner_closes_on_the_wall_envelope() {
+        // Walls on z = 0 and x = 4, each 0.12 thick, so the corner they wrap runs from
+        // the outer envelope point (4.06, -0.06) to the inner one (3.94, 0.06).
+        let scene = rect_room(4.0, 3.0);
+        let (outer, inner) = (Vec2::new(4.06, -0.06), Vec2::new(3.94, 0.06));
+
+        // Wall 0 ends at the junction: its end corners are footprint slots 1 and 2.
+        let along_x = footprint(&scene, 0);
+        assert_near(along_x[1], outer, "wall 0 outer end");
+        assert_near(along_x[2], inner, "wall 0 inner end");
+
+        // Wall 1 starts there: slots 0 and 3. Both walls land on the same two points,
+        // which is what "the corner closes" means — no gap outside, no lump inside.
+        let along_z = footprint(&scene, 1);
+        assert_near(along_z[0], outer, "wall 1 outer start");
+        assert_near(along_z[3], inner, "wall 1 inner start");
+    }
+
+    #[test]
+    fn a_closed_room_mitres_to_exactly_its_inner_and_outer_rectangles() {
+        // Four mitred corners leave eight distinct points: the 4.12 × 3.12 outer
+        // rectangle and the 3.88 × 2.88 inner one. Anything else means a corner is
+        // overlapping (a point inside the envelope) or gapping (one outside it).
+        let scene = rect_room(4.0, 3.0);
+        let expected = [
+            (-0.06, -0.06),
+            (4.06, -0.06),
+            (4.06, 3.06),
+            (-0.06, 3.06),
+            (0.06, 0.06),
+            (3.94, 0.06),
+            (3.94, 2.94),
+            (0.06, 2.94),
+        ]
+        .map(|(x, z)| Vec2::new(x, z));
+
+        for index in 0..scene.walls.len() {
+            for corner in footprint(&scene, index) {
+                assert!(
+                    expected.iter().any(|e| e.distance(corner) < 1e-4),
+                    "wall {index} corner {corner} is off the room envelope"
+                );
+            }
+        }
+        // And every expected point is actually reached — two walls each, eight in all.
+        for point in expected {
+            let hits = (0..scene.walls.len())
+                .flat_map(|i| footprint(&scene, i))
+                .filter(|c| c.distance(point) < 1e-4)
+                .count();
+            assert_eq!(hits, 2, "{point} reached by {hits} wall corners, want 2");
+        }
+    }
+
+    #[test]
+    fn walls_of_unequal_thickness_still_meet_at_one_point() {
+        // The mitre is the intersection of the two offset lines, so a thin wall meeting
+        // a thick one lands both of them on the same corner rather than splitting it.
+        let mut thin = lone_wall(Vec2::ZERO, Vec2::new(4.0, 0.0));
+        thin.thickness = 0.08;
+        let mut thick = lone_wall(Vec2::new(4.0, 0.0), Vec2::new(4.0, 3.0));
+        thick.id = 1;
+        thick.thickness = 0.30;
+        let scene = scene_of(&[thin, thick]);
+
+        // Outer corner: thin wall's far face (z = -0.04) meets thick wall's far face
+        // (x = 4.15). Inner: z = +0.04 meets x = 3.85.
+        let (a, b) = (footprint(&scene, 0), footprint(&scene, 1));
+        assert_near(a[1], Vec2::new(4.15, -0.04), "thin outer end");
+        assert_near(b[0], Vec2::new(4.15, -0.04), "thick outer start");
+        assert_near(a[2], Vec2::new(3.85, 0.04), "thin inner end");
+        assert_near(b[3], Vec2::new(3.85, 0.04), "thick inner start");
+    }
+
+    #[test]
+    fn mitring_moves_corners_without_adding_geometry() {
+        // Same quad count as a square wall, with and without an opening: the mitre
+        // slides corners along the centreline, it does not re-partition the faces.
+        let scene = rect_room(4.0, 3.0);
+        let (wall, ends) = (scene.walls[0], mitre_walls(&scene)[0]);
+        assert_ne!(ends, WallEnds::square(&wall), "wall 0 should be mitred");
+
+        let mut solid = MeshBuffers::default();
+        wall_mesh(&wall, &[], ends, &mut solid);
+        assert_eq!(solid.vertex_count() / 4, 6);
+
+        let mut with_door = MeshBuffers::default();
+        let door = opening(0, OpeningKind::Door, 2.0, 0.0);
+        wall_mesh(&wall, &[door], ends, &mut with_door);
+        assert_eq!(with_door.vertex_count() / 4, 13);
+    }
+
+    #[test]
+    fn a_mitred_face_still_runs_the_full_length_of_its_side() {
+        // The long faces are what a viewer sees; each must reach its own two corners,
+        // so the outer face grows past the centreline while the inner one shrinks.
+        let scene = rect_room(4.0, 3.0);
+        let (wall, ends) = (scene.walls[0], mitre_walls(&scene)[0]);
+        let mut mesh = MeshBuffers::default();
+        wall_mesh(&wall, &[], ends, &mut mesh);
+
+        let on_side = |z: f32| {
+            mesh.positions
+                .chunks(3)
+                .filter(|v| (v[2] - z).abs() < 1e-4)
+                .map(|v| v[0])
+                .fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)))
+        };
+        assert_eq!(on_side(-0.06), (-0.06, 4.06)); // outer face, extended both ends
+        assert_eq!(on_side(0.06), (0.06, 3.94)); // inner face, pulled back both ends
+    }
+
+    #[test]
+    fn mitred_end_caps_still_face_away_from_the_wall() {
+        // The caps are no longer square to the wall — they lie in the mitre plane — so
+        // check they did not wind themselves inside out on the way.
+        let scene = rect_room(4.0, 3.0);
+        for (index, wall) in scene.walls.iter().enumerate() {
+            let mut mesh = MeshBuffers::default();
+            wall_mesh(wall, &[], mitre_walls(&scene)[index], &mut mesh);
+            let centre = Vec3::new(
+                (wall.start.x + wall.end.x) * 0.5,
+                wall.height * 0.5,
+                (wall.start.y + wall.end.y) * 0.5,
+            );
+            for (centroid, normal) in face_normals(&mesh) {
+                assert!(normal.is_finite(), "wall {index}: non-finite normal {normal}");
+                assert!(
+                    (centroid - centre).dot(normal) > 0.0,
+                    "wall {index}: inward-facing normal {normal} at {centroid}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wall_shorter_than_its_own_mitres_still_emits_finite_geometry() {
+        // A 10 cm stub between two 90° corners has 6 cm bitten off each end of its inner
+        // face, so that face inverts and drops out. Degenerate, but it must not produce
+        // NaN normals or panic — a user mid-drag can pass through this shape.
+        let scene = scene_of(&[
+            lone_wall(Vec2::new(-2.0, 0.0), Vec2::ZERO),
+            Wall {
+                id: 1,
+                ..lone_wall(Vec2::ZERO, Vec2::new(0.0, 0.1))
+            },
+            Wall {
+                id: 2,
+                ..lone_wall(Vec2::new(0.0, 0.1), Vec2::new(2.0, 0.1))
+            },
+        ]);
+        let mesh = shell_mesh(&scene);
+        assert!(mesh.triangle_count() > 0);
+        assert!(
+            mesh.positions.iter().chain(&mesh.normals).all(|v| v.is_finite()),
+            "degenerate stub emitted non-finite geometry"
+        );
     }
 
     /// A closed rectangular room, corner at the origin, with matching walls and floor.
