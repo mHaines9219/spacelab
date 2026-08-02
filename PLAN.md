@@ -69,32 +69,37 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
   drag, rotate, scale and typed-dimension paths, so the warning tracks the item live under
   the cursor. Rule #1 holds: Rust decides what crowded means, JS only colours what it is
   handed.
-- **Dropped the result sort after measuring it.** Sorting `crowded_ids` cost **1.7 KB
+- **Dropped the result sort after measuring it.** Sorting `crowded_ids` cost **1.8 KB
   gzipped** of pulled-in sort machinery to reorder a list that is already in ascending id
-  order and whose only consumer reads it straight into a `Set` — 40,375 B with the sort
-  against 38,617 B without. WASM landed at **38.6 KB gzipped, up from 35.4 KB** on `main`
-  (budget 250 KB). Both measured this session, both from a fresh `npm run wasm`, and both
-  in **decimal KB** — the same convention the budget and the M0 gate table use. Worth
-  stating outright, because the raw byte counts are 38,617 and 35,353: read as KiB those
-  same builds are 37.7 and 34.5, and a 1 KB argument between two entries is usually this
-  and not a regression.
+  order and whose only consumer reads it straight into a `Set` — 40,353 B with the sort
+  against 38,595 B without. WASM landed at **38.6 KB gzipped, up from 35.3 KB** on `main`
+  (budget 250 KB). All three builds measured this session through one method, `gzip -n -9`,
+  and quoted in **decimal KB** — the convention the budget and the M0 gate table use.
+  Worth stating outright: read as KiB the same two builds are 37.7 and 34.5, so a ~1 KB
+  disagreement between two entries in this log is usually this and not a regression.
+  Compression settings move these by ~70 B, which is well under the precision anyone
+  should read into them.
 - Verified: **58 Rust tests + clippy clean** (was 46) — 9 in `clearance.rs` covering a
   rotation that pushes an item into a neighbour it used to clear, a diagonal near-miss
   that only the *turned* box's own axis separates, flush contact not counting as
   collision, stashing, and scaling into a neighbour; 3 binding tests covering the
   staggered drop, set-aside, and that the warning rewinds with undo because nothing caches
   it. `tsc` clean.
-- **Looked at it in a real browser, which is how the third colour got found.** Playwright
-  drove headless Chromium at `f2fe75f`: create room → drop two couches → deselect → grab
-  one → drag it to the back wall → drag the second clear. **Six checkpoints, no console
-  errors**, each reading the live outline materials rather than re-querying Rust, so a
-  stale outline the refresh forgot to recolour cannot pass — `0x5b9dff` selected-and-clear,
-  `0xffa53d` crowded-unselected, `0xff5c3d` crowded-and-selected, then back to blue with
-  the other outline hidden once both fit. Screenshots reviewed at each step. The **first**
-  run of this is what surfaced the missing third colour: two amber couches, one of them
-  selected, and no way to tell which. Scope honestly: **one browser, one room shape, and
-  the bullpen paths were not driven through the UI** — set-aside and re-import are covered
-  by the binding tests only.
+- **Driven in a real browser, twice, both against the code in `4032915`** (this entry's
+  own commit only touches `PLAN.md`; the four code files are byte-identical). Playwright
+  on headless Chromium.
+  Run one — create room → place three couches one at a time → set aside → re-import:
+  **11/11 checks across three consecutive runs, no console errors.** Run two exercised the
+  thing the first could not, a **real pointer drag**: place two couches, pick one off the
+  canvas, drag it clear, and watch the outlines go `0xffa53d`/`0xff5c3d` (crowded
+  unselected / crowded *and* selected) → `0x5b9dff` with the unselected outline hidden once
+  both fit. Both runs read the **live outline materials** rather than re-querying Rust, so
+  a stale outline the refresh forgot to recolour cannot pass. Screenshots reviewed.
+- Scope of that honestly: **one browser, one room shape, one asset.** The drag run picks
+  its couch by sweeping the canvas for a hit, so it proves the path works, not that it
+  works from any angle. Both drivers are ad-hoc and uncommitted, matching this repo's
+  existing practice of no checked-in e2e — which does mean neither will catch a
+  regression on its own.
 
 **Remains**
 
