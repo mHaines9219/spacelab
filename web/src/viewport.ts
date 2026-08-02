@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import init, { Document } from "./wasm/wasm_bindings.js";
+import { assertBindingIsCurrent } from "./binding-guard";
 
 const TEX_ROOT = "/assets/textures";
 // Directory per floor finish; index matches Rust's `FloorMaterial` ordinal.
@@ -209,6 +210,7 @@ export async function createViewport(
   onBullpen: (items: BullpenItem[]) => void,
 ): Promise<ViewportHandle> {
   await init();
+  assertBindingIsCurrent(Document.prototype);
   const doc = new Document();
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });

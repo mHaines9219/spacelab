@@ -39,6 +39,46 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### A stale WASM binding now fails with an instruction · 2026-08-02
+
+**Accomplished**
+
+- **The app says what to do instead of dying on a `TypeError`.** Reported as *"the page
+  loads but nothing renders"* with `doc.lighting is not a function` — a correct checkout
+  whose compiled binding predated the method. `web/src/wasm/` is gitignored and generated
+  from the Rust crates, so a pull brings TypeScript that calls new methods while leaving
+  the old binding in place; Vite hot-reloads the TypeScript and never rebuilds the WASM,
+  so **a dev server left running across a pull produces exactly that mismatch**.
+  `npm run dev` rebuilds it, but a bare `vite`, `npm run preview`, or an already-running
+  server does not.
+- One check after `init()`, in a new `web/src/binding-guard.ts`, naming the missing
+  methods and the command to run. Deliberately a **tripwire, not an inventory** — six
+  methods whose absence means the binding predates code that needs them. A list mirroring
+  the whole surface would drift and start failing for the wrong reason.
+- **Brings the `vitest` + `jsdom` unit layer**, since this is the first thing in the tree
+  that needs one. Rust has unit tests and the browser has Playwright; storage- and
+  binding-level failure logic lives in the gap between them. `npm run test:unit`. The
+  split is meant to stay legible: **vitest for pure logic with stubbed edges, Playwright
+  for the real app.**
+- Verified: **5 unit tests**, and that they bite rather than pass — a guard that never
+  reports missing fails 4 of the 5, and a message that drops the `npm run wasm`
+  instruction fails exactly the test written for it, since the instruction is the value.
+  All six required names confirmed present in a freshly built binding, and the app driven
+  in Chromium on a current build to confirm the guard stays **silent** — firing on a
+  healthy tree would be worse than not existing.
+
+**Remains**
+
+- **The required-method list is maintained by hand.** Nothing checks that it keeps pace
+  with what the web layer actually calls, so it can only catch bindings older than the
+  names already in it. Adding a name is a deliberate act at the moment a method ships —
+  and a name added *before* its method exists would refuse to boot on every healthy tree,
+  which is the failure mode this list must never have.
+- It only guards the `Document` surface, and only by name. A binding whose method
+  *signatures* changed while their names did not — an argument added, say — still fails
+  the old way.
+- The `vitest` CI job and its required-check registration are not in this PR.
+
 ### M1: the app can finally show you what your walls enclose · 2026-08-02
 
 **Accomplished**
