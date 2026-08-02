@@ -39,6 +39,68 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### M1: the app can finally show you what your walls enclose · 2026-08-02
+
+**Accomplished**
+
+- **Room detection has a UI.** `rooms(&scene)` has been on the binding since it landed and
+  **nothing on screen used it** — the feature existed and no user could see it. The HUD now
+  carries an `enclosed` row: the area the walls close in, or `open — nothing enclosed` when
+  they close in nothing. Approved by the owner when room detection merged and not built
+  until now; it was the first thing owed against this milestone.
+- **It shows the distinction the feature exists to make.** Enclosure is *not* the floor: the
+  default room has a complete rectangular floor and encloses nothing, because only its two
+  far walls are raised. Delete a wall from a closed room and the floor is untouched while
+  the enclosure disappears. Both states are asserted, and the second one is the one that
+  makes the readout worth having — it answers "have I actually closed this space?", which
+  no other part of the UI can.
+- **`0 sq ft` is deliberately never shown.** A closed room of no size and a room that isn't
+  closed are different facts, and a number would conflate them.
+- **Square feet, not m².** Every other measurement the user sees is feet and inches, so the
+  original `12.0 m²` sketch would have put two unit systems in one panel. Rust keeps owning
+  the geometry and returns m²; the conversion is presentation and lives in `App.tsx`.
+- **Read on wall change, not per frame.** Detection is a planar-graph walk, so it is
+  refreshed inside `syncRoomGeometry` — the one path every wall edit already takes, and the
+  same funnel the openings rebuild was paired into — and cached for the per-frame stats.
+  Nothing about what the walls enclose can change without a wall edit.
+- Verified: **24 browser tests green** (was 21), `tsc` clean, 103 Rust tests untouched — this
+  change adds no Rust. Three new specs in `room.spec.ts`, with `traceClosedRoom`,
+  `enclosedReadout` and `deleteAnyWall` added to `tests/app.ts` alongside the other page
+  objects. **Mutation-checked:** deleting the refresh line kills exactly the two area specs
+  and leaves the other seven passing.
+
+**Remains**
+
+- **One of the three new specs would pass vacuously against a readout that never updates.**
+  "The default room encloses nothing" is satisfied by a cache that starts empty and stays
+  empty — the mutant above does not kill it. The two that do kill it are the traced-room and
+  broken-loop cases. Recorded because a green count hides which tests are load-bearing.
+- **The area arithmetic is not asserted in the browser, only that a plausible number
+  appears.** Rust unit tests on `rooms()` own the geometry; the specs own that the readout
+  tracks the wall graph. A wrong-by-a-constant conversion would survive the browser suite —
+  `SQ_FT_PER_SQ_M` is checked by eye against a traced room, not by a test.
+- **Multi-room rooms show a count and a total, not a breakdown.** `2 rooms · 340 sq ft` is
+  all a user gets; per-room areas are available on the binding and unshown. Fine for one
+  room, thin the moment partitions are common.
+- **Two traps this cost me, both worth having written down.** Clicking the Draw editor's
+  corners without waiting for each to register produces a *degenerate* polygon that still
+  reports four walls — a passing wall count over a broken room; the helper now waits on the
+  per-corner `<circle>`. And the readout is React state on the stats tick while the probes
+  answer immediately, so reading it once after a probe assertion outruns the render — it
+  has to be polled. Both are the provenance failure from
+  `GUIDES/VERIFYING_NEGATIVE_RESULTS.md`: the check was real, the thing checked was not
+  what I thought.
+- **M1 is still 🚧, deliberately.** This removes the reason the flag was held, but the flip
+  is its own reviewable PR rather than a rider on a UI change. What that PR still has to
+  argue past: shrinking a room can leave a hand-drawn wall standing outside the floor, since
+  keeping it is the point of the resize fix.
+- Carried: per-room breakdown unshown; `__deleteWallById` hand-mirrors `deleteSelectedWall`;
+  the staggered 0.3 m drop point overlaps a 1.96 m couch on every placement; per-wall
+  material still waits on a `shell_mesh` split; walkway clearance, door-swing arcs and
+  furniture-vs-wall still open in M2; camera framing parked by the owner's MVP-first ruling;
+  `front=+Z` unverified; thumbnails uncached; KTX2 unbuilt; no redo; rotate/scale undo
+  per-keypress; RoomPlan real-scan validation owed; fps on one machine; `cargo fmt` diffs
+  across the three crates still owed as their own commit.
 ### CI: a PR must target `main`, and the log guard now runs after a merge too · 2026-08-02
 
 **Accomplished**

@@ -141,6 +141,7 @@ export function App() {
                 <Row label="frame" value={`${stats.frameMs.toFixed(2)} ms`} />
                 <Row label="triangles" value={stats.triangles.toLocaleString()} />
                 <Row label="anchor" value={stats.snapped ? "against wall" : "floor"} />
+                <Row label="enclosed" value={enclosedLabel(stats.rooms.areasM2)} />
               </>
             ) : (
               <span>loading…</span>
@@ -636,4 +637,26 @@ function Row({ label, value }: { label: string; value: string }) {
       <span>{value}</span>
     </span>
   );
+}
+
+const SQ_FT_PER_SQ_M = 10.7639;
+
+/**
+ * What the walls enclose, read off the wall graph — deliberately not the same thing as
+ * the floor. A room with a wall deleted keeps its whole floor footprint but encloses
+ * nothing, and that distinction is the point of the readout: it tells you whether you
+ * have actually closed a space.
+ *
+ * Square feet, because every other measurement the user sees is feet and inches. The
+ * areas arrive in m² from Rust, which owns the geometry; converting for display is a
+ * presentation concern and stays here.
+ */
+function enclosedLabel(areasM2: number[]): string {
+  if (areasM2.length === 0) return "open — nothing enclosed";
+  const sqFt = areasM2.map((m2) => m2 * SQ_FT_PER_SQ_M);
+  const total = sqFt.reduce((a, b) => a + b, 0);
+  const totalText = `${total.toFixed(0)} sq ft`;
+  if (sqFt.length === 1) return totalText;
+  // Largest first, matching the order Rust returns them in.
+  return `${sqFt.length} rooms · ${totalText}`;
 }

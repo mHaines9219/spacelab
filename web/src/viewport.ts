@@ -97,6 +97,16 @@ export type Stats = {
   triangles: number;
   snapped: boolean;
   wasmBytes: number;
+  /**
+   * What the walls *enclose*, which is not the same as the floor — a room with a wall
+   * removed still has its whole floor footprint but encloses nothing. `areasM2` is one
+   * entry per detected room, largest first, so `[]` means "no enclosed room" rather
+   * than "no room".
+   *
+   * Refreshed when the walls change, not per frame: detection is a graph walk, and
+   * nothing about it can change between frames without a wall edit.
+   */
+  rooms: { areasM2: number[] };
 };
 
 /** One catalog asset, as read from `/assets/catalog.json`. */
@@ -437,6 +447,12 @@ export async function createViewport(
   const placed = new Map<number, CatalogEntry>();
   let selectedId: number | null = null;
   let snapped = false;
+  /**
+   * Areas (m²) of what the walls enclose, largest first — refreshed by
+   * `syncRoomGeometry` rather than read per frame, since only a wall edit can change it.
+   * Empty means the walls enclose nothing, which is the default room's real state.
+   */
+  let roomAreasM2: number[] = [];
 
   const urlOf = (entry: CatalogEntry) => `/assets/${entry.blob}`;
 
@@ -856,6 +872,11 @@ export async function createViewport(
   // in Rust. Three call sites had re-uploaded the walls without re-deriving the
   // openings, which left a deleted wall's door hanging in mid-air; pairing them here
   // means a new call site cannot reintroduce that.
+  //
+  // The detected-room areas are refreshed here for the same reason: what the walls
+  // enclose is a property of the wall graph, so it can only change when the walls do.
+  // Reading it here rather than per frame keeps a graph walk off the render loop, and
+  // keeps it on the one path every wall edit already takes.
   const syncRoomGeometry = () => {
     floorMesh.geometry.dispose();
     floorMesh.geometry = meshGeometry(
@@ -872,6 +893,7 @@ export async function createViewport(
       doc.wall_indices(),
     );
     rebuildOpenings();
+    roomAreasM2 = Array.from(doc.detected_room_areas());
   };
 
   // Frame the camera to the current footprint so any room size fits nicely.
@@ -960,6 +982,7 @@ export async function createViewport(
         triangles: renderer.info.render.triangles,
         snapped,
         wasmBytes,
+        rooms: { areasM2: roomAreasM2 },
       });
     }
   });
