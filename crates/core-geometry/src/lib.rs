@@ -2,6 +2,7 @@
 
 mod junction;
 mod room;
+pub mod swing;
 
 pub use junction::{WallEnds, mitre_walls};
 pub use room::{Room, rooms};

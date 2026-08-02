@@ -7,7 +7,7 @@
 
 use core_geometry::{
     MeshBuffers, clearance::crowded, floor_mesh, mitre_walls, resolve_placement, seat_opening,
-    wall_mesh,
+    swing::swing_blocked, wall_mesh,
 };
 use core_scene::{
     Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, LightingPreset, Opening,
@@ -603,6 +603,19 @@ impl Document {
         crowded(&self.scene)
     }
 
+    /// Ids of the doors that cannot open whichever way they are hung.
+    ///
+    /// Derived, like `crowded_ids` and the room queries — computed from the document on
+    /// demand and stored nowhere, so it costs the save format nothing.
+    ///
+    /// Conservative on purpose: the document does not record which jamb a door hinges on
+    /// or which way it opens, so this reports only doors with **no** clear option. A door
+    /// blocked the way it happens to be hung, but clear another way, cannot be
+    /// distinguished until handedness is document state.
+    pub fn swing_blocked_ids(&self) -> Vec<u32> {
+        swing_blocked(&self.scene)
+    }
+
     /// Select a furnishing by id (no-op if it doesn't exist). Selection is UI state,
     /// so it is not checkpointed.
     pub fn select(&mut self, id: u32) {
@@ -1159,6 +1172,30 @@ mod tests {
         assert_ne!(doc.wall_segments(), before);
         assert!(doc.undo());
         assert_eq!(doc.wall_segments(), before);
+    }
+
+    #[test]
+    fn a_door_boxed_in_on_both_sides_is_reported_as_unable_to_open() {
+        // Through the binding rather than the query, so the wiring is exercised too.
+        let mut doc = Document::new();
+        doc.set_rectangle(6.0, 4.0);
+        let wall = doc.wall_ids()[1];
+        let door = doc.add_opening(0, wall, 3.0, 0.0);
+        assert!(door >= 0);
+        assert!(
+            doc.swing_blocked_ids().is_empty(),
+            "an empty room blocks nothing"
+        );
+
+        // Two wide, deep items straddling the doorway — one each side of the wall, so
+        // every hanging is covered. One alone would leave the door a way to open.
+        for (i, z) in [(0usize, 0.5f32), (1, -0.5)].into_iter() {
+            let id = doc.add_furnishing("wardrobe", 3.0, 2.0, 1.0);
+            assert!(id > 0, "furnishing {i} was not placed");
+            doc.select(id);
+            doc.drag(3.0, z);
+        }
+        assert_eq!(doc.swing_blocked_ids(), vec![door as u32]);
     }
 
     #[test]

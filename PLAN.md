@@ -47,6 +47,60 @@ yet satisfied, and the rows say so rather than rounding up.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### M2: door-swing arcs — whether a door has room to open · 2026-08-02
+
+**Accomplished**
+
+- **A door that cannot open is now a question the document can answer.** New
+  `crates/core-geometry/src/swing.rs`: a hinged leaf sweeps a quarter-circle centred on
+  its hinge with the door's own width as radius, and `swing_blocked(&scene)` reports the
+  doors with nowhere to swing. Exposed as `swing_blocked_ids()`, the same shape as
+  `crowded_ids()` and the room queries — **derived, computed on demand, stored nowhere**,
+  so it costs the save format nothing. That is the third query this session to come out
+  free, which is Rule #1 still paying.
+- **The pivot is at a jamb, not the opening's centre.** A hinge lives at the edge of the
+  hole. Centring it would understate the reach by half a door width one side and
+  overstate it the other — a test pins both pivots to the ends of `Opening::span()`.
+- **The document does not record which way a door hangs, and this does not invent it.**
+  `Opening` has width, position and kind, and nothing about handedness or swing
+  direction. Rather than add a field and guess a default, the query answers what the
+  missing data still permits: *is there any way to hang this door that leaves it room?*
+  All four hangings blocked is unambiguously a fault; one clear option is a choice nobody
+  has made. `swing_options()` returns the four so a caller can offer them the day
+  handedness becomes document state.
+- **Walls count as obstacles, its own wall excluded.** A door hung too near a return
+  fouls the wall it opens toward — covered by a test with a door 0.5 m from a corner, and
+  its discriminating twin further along the same wall that opens fine. That test earned
+  its keep immediately: it failed first time and the cause was a real bug, a wall
+  footprint built with the wrong yaw convention that rotated every wall rectangle a
+  quarter turn. Walls sat in open floor and no door could foul one.
+- Verified: **126 tests green + clippy clean + `rustfmt` clean** (11 new in `swing.rs`,
+  1 at the binding driving the real `add_furnishing`/`drag` path). WASM **105,744 B
+  gzipped**, up 1,778 B from `main`'s 103,966 B (`gzip -n -9`, fresh build) — 42% of the
+  250 KB budget.
+
+**Remains**
+
+- **The rendering half is not here.** Nothing draws the arc, so a blocked door is
+  detectable and invisible — the same *correct module wired to nothing* shape that left
+  room detection undelivered for two PRs. Held deliberately: the visualisation lands in
+  `viewport.ts`, and #31 is in flight in that file. It is the next slice, not a
+  discovered gap.
+- **The query is conservative and will under-report.** Because handedness is unknown, a
+  door blocked *the way it is actually hung* but clear another way reads as fine. That is
+  the safe direction — a false alarm on every awkward door would train people to ignore
+  it — but a green result means "hangable somehow", not "hangs well".
+- **The sweep is a flat quarter-circle, so this is a floor-plan answer.** A leaf clears a
+  low obstacle in reality and is reported blocked here, exactly as the clearance test
+  treats a footstool like a wardrobe. Consistent with a document that is prismatic on
+  purpose, but it is an approximation and not free of false positives.
+- **`kind` is the only discriminator for "has a leaf".** Correct today, since windows do
+  not swing — but a stable door or a French window would break that assumption.
+- Carried: M2 keeps **walkway clearance** and **furniture-vs-wall** open, plus floor
+  containment — nothing stops a furnishing being dragged off the floor. `cargo fmt` is
+  gated but reports under `cargo test + clippy`; there is no `rustfmt.toml`; the web side
+  has no formatter at all. The draw tool still accepts a self-intersecting polygon and
+  tells the user nothing.
 ### M2/M3: describe a look and the app furnishes it · 2026-08-02
 
 **Accomplished**
