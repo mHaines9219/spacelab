@@ -1059,9 +1059,22 @@ export async function createViewport(
       : { min: roomBox.min.toArray(), max: roomBox.max.toArray() };
 
     const { position, target } = frameBounds(bounds, camera.fov, currentAspect());
+
+    // Snap, don't drift. Damping keeps easing the camera towards its target over several
+    // frames, and a pan gesture leaves a residual pan that `update()` folds into `target`
+    // on every one of those frames — so a reframe that only sets the pose is dragged back
+    // off the room while that residual bleeds out. It is invisible at 60fps, where the
+    // residual has all but decayed by the time F is pressed; at a starved frame rate (CI
+    // runs the suite near 9fps) enough of it survives to walk the room off the edge, which
+    // is the "F does not bring it back" failure. Turning damping off makes `update()` zero
+    // the pending pan/rotate deltas rather than decay them: the first flushes whatever the
+    // gesture left behind, the second lands the solved pose with nothing left to undo it.
+    controls.enableDamping = false;
+    controls.update();
     controls.target.set(...target);
     camera.position.set(...position);
     controls.update();
+    controls.enableDamping = true;
   };
 
   // A room was (re)generated: rebuild geometry and reframe. Furnishings persist and
