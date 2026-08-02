@@ -246,7 +246,7 @@ yet satisfied, and the rows say so rather than rounding up.
   open in M2; camera framing still open in M3; no 2D plan view of an existing room; a
   real-LiDAR RoomPlan round-trip still owed.
 
-### CI: the unit layer is gated, not just present · 2026-08-02
+### CI: the unit tests run on every PR, not just sit in the tree · 2026-08-02
 
 **Accomplished**
 
@@ -256,7 +256,7 @@ yet satisfied, and the rows say so rather than rounding up.
   goes red without consequence.
 - **Its own job rather than a step inside `tsc + browser suite`.** These tests need no
   WASM, no browser and no catalog, so they answer in seconds instead of queueing behind a
-  ~9 minute browser run. They also cover the branches a real browser cannot be made to
+  ~12 minute browser run. They also cover the branches a real browser cannot be made to
   reach on demand — storage throwing the way Safari private mode does, quota exhaustion,
   and a safety net that failed to write and has to say so.
 - **Deliberately advisory for now.** It is not yet in the required-checks list: adding a
@@ -266,18 +266,35 @@ yet satisfied, and the rows say so rather than rounding up.
 
 **Remains**
 
-- **The unit layer covers one module.** `persistence.ts` and the binding guard have tests;
+- **The unit layer covers two modules.** `persistence.ts` and the binding guard have tests;
   nothing else in `web/src/` does. That is the honest state — this job enforces what
   exists, it does not imply coverage.
 - **The enforcement flip is owed, not done.** Until it happens a red `vitest` job does not
   stop a merge, which is the same advisory-guard problem that let a `PLAN.md` entry vanish
   four seconds before its own check went red this morning.
-- **Four required checks today, five after the flip, and the browser suite is ~9 minutes of
-  them.** Every PR pays that before it can merge. Sharding is the lever when it stops being tolerable, and
-  nothing about it has changed today.
+- **Three required checks today, five after the flip, and the browser suite is ~12 minutes
+  of them.** Every PR pays that before it can merge. Sharding is the lever when it stops
+  being tolerable, and nothing about it has changed today.
 - Carried: `cargo fmt` still ungated and the tree still not `rustfmt`-clean — the window is
   open now that the Rust queue has drained, and it is next; concurrent local suite runs
   still contend; a real-LiDAR RoomPlan round-trip is still owed.
+
+**Corrected 2026-08-02**, after the entry was already on `main`. Four things it got wrong,
+recorded rather than quietly rewritten, because a log that edits itself invisibly is worth
+less than one that shows its scars:
+
+- The heading read *"the unit layer is gated, not just present"* while the body two bullets
+  down read *"Deliberately advisory for now."* The body was corrected when the sequencing
+  ruling arrived and the heading was not. A heading contradicting its own body is the exact
+  damage `PLAN.md log`'s correspondence check exists to catch and the exact thing it cannot
+  see — the check compares entries to each other, not a heading to what sits under it.
+- *"Four required checks today"* — there were **three**. `PR targets main` was counted as a
+  gate; it had been advisory since it landed in #21 and nobody had noticed. That miscount
+  and the later discovery of the drift have the same root, made in writing first.
+- *"~9 minutes"*, twice. Measured at **12m1s** on #26. The figure had passed through three
+  writeups without anyone timing it.
+- *"The unit layer covers one module"*, above a body naming **two**. The same
+  heading-vs-body shape as the first item, in miniature.
 
 ### M5: the save format — document to JSON and back · 2026-08-02
 
