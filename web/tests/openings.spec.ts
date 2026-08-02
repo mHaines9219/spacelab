@@ -31,21 +31,7 @@ test.describe("doors and windows", () => {
     expect(await probe(page, "__wallTris")).toBeGreaterThan(0);
   });
 
-  // KNOWN BUG — deleting a wall leaves its door floating in mid-air.
-  //
-  // Rust is right: `Command::DeleteWall` retains openings off the deleted wall, so the
-  // document drops it. The renderer never hears about it. `deleteSelectedWall`
-  // (`viewport.ts:709`) calls `syncRoomGeometry()` and `rebuildWallPicks()` but never
-  // `reconcileOpenings()`, so the door's pick box, outline and glass pane stay in the
-  // scene at the old wall's position.
-  //
-  // `test.fail()` rather than a skip: the suite stays green, the defect stays visible,
-  // and the day someone adds that call this test goes red for passing unexpectedly —
-  // so the fix cannot land without also retiring this note.
-  //
-  // The probe is not at fault. `__deleteWallById` omits the same call the production
-  // path omits, so it reproduces the bug rather than inventing it.
-  test.fail("deleting a wall takes its openings with it", async ({ page }) => {
+  test("deleting a wall takes its openings with it", async ({ page }) => {
     await openRectangleRoom(page);
     await probe(page, "__addOpeningOnWall", "door", FIRST_WALL);
     await expect.poll(() => probe(page, "__openingCount")).toBe(1);

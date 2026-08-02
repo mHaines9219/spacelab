@@ -273,6 +273,55 @@ mod tests {
         ]));
     }
 
+    /// The inner face of the middle wall in a three-wall kink: `len` long, each turn
+    /// `turn_deg` away from straight. Negative means the mitres from the two ends have
+    /// crossed and the face has inverted, so `wall_mesh` drops it.
+    fn middle_inner_span(len: f32, turn_deg: f32) -> f32 {
+        let t = turn_deg.to_radians();
+        let b = Vec2::ZERO;
+        let c = b + Vec2::new(t.cos(), t.sin()) * len;
+        let scene = scene_of(&[
+            wall(0, Vec2::new(-2.0, 0.0), b),
+            wall(1, b, c),
+            wall(2, c, c + Vec2::new((2.0 * t).cos(), (2.0 * t).sin()) * 2.0),
+        ]);
+        let ends = mitre_walls(&scene)[1];
+        let span = |s: f32| {
+            let (near, far) = ends.face_span(s);
+            far - near
+        };
+        span(1.0).min(span(-1.0))
+    }
+
+    #[test]
+    fn a_wall_shorter_than_its_two_mitres_loses_its_inner_face() {
+        // Each mitred end eats `h / tan(θ/2)` off the inner face, where θ is the interior
+        // angle. So the length at which a wall's inner face inverts is **not** a constant
+        // — it scales with how sharp the corners are, and an acute room is much worse
+        // than a right-angled one:
+        //
+        //   interior 135° (a gentle kink) → inverts below ~5 cm
+        //   interior  90° (a normal room) → inverts below ~12 cm, i.e. 2× thickness
+        //   interior  39° (an acute room) → inverts below ~34 cm
+        //
+        // The acute figure is the one that matters: 34 cm is a wall someone might
+        // actually draw, and it silently loses a face.
+        for (turn, threshold) in [(45.0f32, 0.05f32), (90.0, 0.12), (141.0, 0.34)] {
+            assert!(
+                middle_inner_span(threshold * 2.0, turn) > 0.0,
+                "turn {turn}°: a wall at twice the threshold should keep its inner face"
+            );
+            assert!(
+                middle_inner_span(threshold * 0.5, turn) < 0.0,
+                "turn {turn}°: a wall at half the threshold should have inverted"
+            );
+        }
+        // And the ordering is the actual claim: sharper corners fail at longer walls.
+        let at = |turn| middle_inner_span(0.24, turn);
+        assert!(at(45.0f32) > at(90.0), "a gentle kink must survive better than a right angle");
+        assert!(at(90.0f32) > at(141.0), "a right angle must survive better than an acute corner");
+    }
+
     #[test]
     fn a_corner_just_inside_the_mitre_limit_is_still_mitred() {
         // The limit is 4 thicknesses = 0.48 m of overshoot, which a 0.12 m wall hits at
@@ -296,3 +345,4 @@ mod tests {
         );
     }
 }
+

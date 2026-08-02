@@ -360,6 +360,12 @@ export async function createViewport(
       }
       openings.push({ id, pick, outline, glass });
     }
+    // An opening cannot outlive the wall that owns it (`Command::DeleteWall` cascades
+    // them away), so a selection pointing at one that just vanished is stale. Drop it
+    // here rather than at each call site — the panel reads off `selectedOpening`.
+    if (selectedOpening !== null && !openings.some((o) => o.id === selectedOpening)) {
+      selectOpening(null);
+    }
   };
 
   const openingSelectionPayload = (): OpeningSelection => {
@@ -637,7 +643,6 @@ export async function createViewport(
         const wallId = wallHit.object.userData.wallId as number;
         const id = doc.add_opening(openingMode === "door" ? 0 : 1, wallId, wallHit.point.x, wallHit.point.z);
         syncRoomGeometry();
-        rebuildOpenings();
         if (id >= 0) {
           selectFurnishing(null);
           selectWall(null);
@@ -792,7 +797,6 @@ export async function createViewport(
     } else if (doc.drag_opening(hit.x, hit.z)) {
       // The opening moved within the wall mesh: re-upload it and re-place the proxies.
       syncRoomGeometry();
-      rebuildOpenings();
     }
   });
 
@@ -807,6 +811,12 @@ export async function createViewport(
   canvas.addEventListener("pointercancel", endDrag);
 
   // Re-upload floor + wall geometry from the document after any wall edit.
+  //
+  // Openings rebuild with it, always. Each one is a hole in a wall, so any edit that
+  // moves the wall mesh moves its openings too — and a wall delete cascades them away
+  // in Rust. Three call sites had re-uploaded the walls without re-deriving the
+  // openings, which left a deleted wall's door hanging in mid-air; pairing them here
+  // means a new call site cannot reintroduce that.
   const syncRoomGeometry = () => {
     floorMesh.geometry.dispose();
     floorMesh.geometry = meshGeometry(
@@ -822,6 +832,7 @@ export async function createViewport(
       doc.wall_uvs(),
       doc.wall_indices(),
     );
+    rebuildOpenings();
   };
 
   // Frame the camera to the current footprint so any room size fits nicely.
@@ -842,8 +853,8 @@ export async function createViewport(
     syncRoomGeometry();
     rebuildWallPicks();
     selectWall(null);
-    // A room regen clears the walls (and cascades their openings away); resync proxies.
-    rebuildOpenings();
+    // A room regen clears the walls and cascades their openings away; the proxies came
+    // back with `syncRoomGeometry` above, so there is only the selection left to drop.
     selectOpening(null);
     for (const id of doc.furnishing_ids()) applyTransformFor(id, doc.furnishing_transform(id));
     refreshBullpen();
@@ -874,14 +885,6 @@ export async function createViewport(
     if (selectedOpening === null) return;
     if (!doc.remove_selected_opening()) return;
     syncRoomGeometry();
-    rebuildOpenings();
-    selectOpening(null);
-  };
-
-  // Reconcile opening proxies with the document after an undo (which can add, remove, or
-  // move any of them). The wall mesh was already re-synced by the undo path.
-  const reconcileOpenings = () => {
-    rebuildOpenings();
     selectOpening(null);
   };
 
@@ -949,6 +952,8 @@ export async function createViewport(
     probe.__furnishingCount = () => furnishings.size;
     probe.__wallCount = () => wallPicks.children.length;
     probe.__floorTris = () => (floorMesh.geometry.index?.count ?? 0) / 3;
+    // Mirrors `deleteSelectedWall` exactly. It used to omit the openings rebuild the same
+    // way that path did, so a probe-driven test agreed with the bug instead of catching it.
     probe.__deleteWallById = (id: number) => {
       doc.delete_wall(id);
       syncRoomGeometry();
@@ -980,7 +985,6 @@ export async function createViewport(
       const mz = (segs[i * 4 + 1] + segs[i * 4 + 3]) / 2;
       const id = doc.add_opening(kind === "door" ? 0 : 1, wallId, mx, mz);
       syncRoomGeometry();
-      rebuildOpenings();
       if (id >= 0) selectOpening(id);
       return id;
     };
@@ -996,7 +1000,6 @@ export async function createViewport(
     if (selectedOpening === null) return;
     if (!doc.set_opening_dimension(axis, inches)) return;
     syncRoomGeometry();
-    rebuildOpenings();
     onOpening(openingSelectionPayload());
   };
 
@@ -1037,6 +1040,10 @@ export async function createViewport(
     deleteWall: (id) => {
       doc.delete_wall(id);
       syncRoomGeometry();
+      // The wall is gone from the document, so its pick box has to go too — otherwise
+      // the next click still selects a wall that no longer exists.
+      rebuildWallPicks();
+      if (selectedWall === id) selectWall(null);
     },
     wallSegments: () => Array.from(doc.wall_segments()),
     wallIds: () => Array.from(doc.wall_ids()),
@@ -1066,7 +1073,9 @@ export async function createViewport(
       floorMesh.material = floorMaterials[doc.floor_material()];
       wallMaterial.color.setHex(WALL_TINTS[doc.wall_material()]);
       reconcileFurnishings();
-      reconcileOpenings();
+      // Undo can add, remove or move any opening; `syncRoomGeometry` above already
+      // rebuilt the proxies from the restored document, so only the selection is left.
+      selectOpening(null);
       refreshBullpen();
       selectFurnishing(null);
       const hasRoom = doc.has_room();
