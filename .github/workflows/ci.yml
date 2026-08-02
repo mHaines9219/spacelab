@@ -77,10 +77,44 @@ jobs:
   plan:
     name: PLAN.md log
     runs-on: ubuntu-latest
-    # Needs a base to diff against, so it only runs on pull requests.
-    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: python3 .github/scripts/check_plan.py "${{ github.event.pull_request.base.sha }}"
+      - name: On a PR — full check against the base
+        if: github.event_name == 'pull_request'
+        run: python3 .github/scripts/check_plan.py "${{ github.event.pull_request.base.sha }}"
+      # Branch protection is unavailable on this plan (the API returns 403 "Upgrade to
+      # GitHub Pro or make this repository public"), so a red PR check cannot block a
+      # merge — #16 was merged four seconds *before* its own log check went red, and took
+      # an entry with it. This pass runs after the fact: it cannot prevent the loss, but
+      # it marks `main` red within a minute instead of leaving it silent.
+      - name: On main — did the merge drop an entry?
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: python3 .github/scripts/check_plan.py "${{ github.event.before }}" --post-merge
+
+  base:
+    name: PR targets main
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      # A PR stacked on another PR's branch can be merged into a base that main has
+      # already moved past, and then it reads MERGED while never reaching main. That
+      # happened to #18: it targeted `ci-browser-suite`, #17 merged to main from an
+      # earlier commit, and the floating-door fix it carried was silently lost.
+      #
+      # Note this is NOT an `is-ancestor` check against main. This repo squash-merges, so
+      # no PR head is ever an ancestor of main — #17's own head is not, and its content
+      # landed fine. That check would fail every correctly-merged PR.
+      - name: Base branch must be main
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ "$BASE" != "main" ]; then
+            echo "::error::This PR targets '$BASE', not 'main'."
+            echo "Stacked PRs can merge into a base that main has already moved past —"
+            echo "the PR reads MERGED and its changes never reach main. Retarget to main"
+            echo "and rebase, or land the base PR first and reopen against main."
+            exit 1
+          fi
+          echo "base is main"
