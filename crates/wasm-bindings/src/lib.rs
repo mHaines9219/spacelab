@@ -11,7 +11,7 @@ use core_geometry::{
 };
 use core_scene::{
     Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, Opening, OpeningId,
-    OpeningKind, Placement, Scene, Wall,
+    OpeningKind, Placement, Scene, Wall, WallMaterial,
 };
 use glam::{Vec2, Vec3};
 use wasm_bindgen::prelude::*;
@@ -237,6 +237,45 @@ impl Document {
         self.scene.walls.iter().map(|w| w.id).collect()
     }
 
+    // --- Detected rooms ----------------------------------------------------
+    //
+    // What the walls actually enclose, which is *not* the floor: `floor_outline` is the
+    // document's own footprint and stays put when a wall is deleted (see `floor_mesh`).
+    // The names carry `detected_` because `has_room`/`room_bounds` above mean the floor.
+    // These three read together — outlines is a flat run of `[x, z, …]` split by the
+    // corner counts, in the same order as the areas. Solved on demand rather than cached
+    // on `rebuild`, since nothing needs it every frame.
+
+    /// Number of enclosed areas the walls make, largest first.
+    pub fn detected_room_count(&self) -> usize {
+        core_geometry::rooms(&self.scene).len()
+    }
+
+    /// Every detected room's corners, concatenated as `[x, z, …]`. Split with
+    /// `room_corner_counts`.
+    pub fn detected_room_outlines(&self) -> Vec<f32> {
+        core_geometry::rooms(&self.scene)
+            .iter()
+            .flat_map(|r| r.outline.iter().flat_map(|p| [p.x, p.y]))
+            .collect()
+    }
+
+    /// Corners per room, in the same order — the split points for `detected_room_outlines`.
+    pub fn detected_room_corner_counts(&self) -> Vec<u32> {
+        core_geometry::rooms(&self.scene)
+            .iter()
+            .map(|r| r.outline.len() as u32)
+            .collect()
+    }
+
+    /// Floor area in m² per detected room, largest first.
+    pub fn detected_room_areas(&self) -> Vec<f32> {
+        core_geometry::rooms(&self.scene)
+            .iter()
+            .map(|r| r.area())
+            .collect()
+    }
+
     /// True once a room (floor) exists — independent of how many walls remain.
     pub fn has_room(&self) -> bool {
         !self.scene.floor_outline.is_empty()
@@ -275,6 +314,27 @@ impl Document {
         self.checkpoint();
         self.scene.apply(Command::SetFloorMaterial(material));
         self.floor_material()
+    }
+
+    // --- Wall finish -------------------------------------------------------
+
+    /// Current wall paint finish as an ordinal matching `WallMaterial`.
+    pub fn wall_material(&self) -> u8 {
+        self.scene.wall_material as u8
+    }
+
+    /// Choose the wall paint finish by ordinal; returns the resulting ordinal.
+    pub fn set_wall_material(&mut self, index: u8) -> u8 {
+        let material = match index {
+            0 => WallMaterial::WarmWhite,
+            1 => WallMaterial::CoolGrey,
+            2 => WallMaterial::Greige,
+            3 => WallMaterial::Sage,
+            _ => WallMaterial::Clay,
+        };
+        self.checkpoint();
+        self.scene.apply(Command::SetWallMaterial(material));
+        self.wall_material()
     }
 
     // --- Furnishing catalog & selection -----------------------------------
@@ -779,6 +839,33 @@ mod tests {
         assert!(!doc.undo());
     }
 
+    /// The wall finish rides the same command funnel as everything else, so undo covers
+    /// it for free — and picking a wall colour must not disturb the floor's.
+    #[test]
+    fn wall_finish_is_selectable_and_undoable_without_touching_the_floor() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        assert_eq!(doc.wall_material(), 0);
+
+        doc.set_floor_material(2);
+        assert_eq!(doc.set_wall_material(3), 3);
+        assert_eq!(doc.floor_material(), 2, "wall finish must not move the floor");
+
+        // Undo the wall finish only: walls revert, the floor keeps its choice.
+        assert!(doc.undo());
+        assert_eq!(doc.wall_material(), 0);
+        assert_eq!(doc.floor_material(), 2);
+        assert_eq!(doc.wall_count(), 2, "the room is untouched by a finish change");
+    }
+
+    /// Out-of-range ordinals clamp to the last finish rather than panicking, matching
+    /// `set_floor_material`'s catch-all arm.
+    #[test]
+    fn an_out_of_range_wall_finish_ordinal_clamps() {
+        let mut doc = Document::new();
+        assert_eq!(doc.set_wall_material(99), 4);
+    }
+
     #[test]
     fn ops_after_undoing_a_selected_furnishing_away_are_safe_no_ops() {
         let mut doc = Document::new();
@@ -802,6 +889,48 @@ mod tests {
         assert_eq!(doc.wall_count(), 2);
         // …but the floor keeps the full 4×3 rectangular footprint.
         assert_eq!(doc.room_bounds(), vec![0.0, 0.0, 4.0, 3.0]);
+    }
+
+    #[test]
+    fn the_default_rectangle_has_a_floor_but_encloses_no_room() {
+        // The two distinctions this binding exists to make. `has_room` is about the
+        // floor, which a fresh rectangle always has; `detected_room_count` is about
+        // what the walls enclose, and two walls in an L enclose nothing.
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        assert!(doc.has_room());
+        assert_eq!(doc.detected_room_count(), 0);
+        assert!(doc.detected_room_areas().is_empty());
+        assert!(doc.detected_room_outlines().is_empty());
+    }
+
+    #[test]
+    fn closing_the_open_sides_by_hand_makes_the_room_detectable() {
+        // Add back the two walls `set_rectangle` leaves out and the loop closes.
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_wall(4.0, 0.0, 4.0, 3.0);
+        doc.add_wall(4.0, 3.0, 0.0, 3.0);
+        assert_eq!(doc.detected_room_count(), 1);
+        assert_eq!(doc.detected_room_corner_counts(), vec![4]);
+        assert!((doc.detected_room_areas()[0] - 12.0).abs() < 1e-4);
+        // Flat [x, z, …] over the four centreline corners.
+        assert_eq!(doc.detected_room_outlines().len(), 8);
+        // Deleting one of them opens the loop again.
+        doc.delete_wall(doc.wall_ids()[0]);
+        assert_eq!(doc.detected_room_count(), 0);
+        // …and the floor is untouched by any of it.
+        assert_eq!(doc.room_bounds(), vec![0.0, 0.0, 4.0, 3.0]);
+    }
+
+    #[test]
+    fn a_traced_polygon_encloses_the_room_it_traced() {
+        let mut doc = Document::new();
+        doc.set_polygon(&[0.0, 0.0, 4.0, 0.0, 4.0, 2.0, 2.0, 2.0, 2.0, 4.0, 0.0, 4.0]);
+        assert_eq!(doc.detected_room_count(), 1);
+        assert_eq!(doc.detected_room_corner_counts(), vec![6]);
+        // The L is 4×2 + 2×2 = 12, not its 4×4 bounding box.
+        assert!((doc.detected_room_areas()[0] - 12.0).abs() < 1e-4);
     }
 
     #[test]
