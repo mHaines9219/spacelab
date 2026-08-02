@@ -27,6 +27,13 @@ export const REQUIRED_DOCUMENT_METHODS = [
   "set_wall_material",
   "floor_material",
   "crowded_ids",
+  // M5 persistence. Added in the same push that ships them, so this list can never
+  // describe a future binding — a guard that fires on a healthy tree teaches people to
+  // ignore the message it exists to deliver.
+  "save_json",
+  "load_json",
+  "revision",
+  "furnishing_asset_id",
 ] as const;
 
 /** Which required methods the given prototype is missing, in declaration order. */
