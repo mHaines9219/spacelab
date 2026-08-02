@@ -10,3 +10,5 @@ web/assets-src/_kenney/
 .DS_Store
 .env
 .env.local
+web/test-results/
+web/playwright-report/

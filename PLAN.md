@@ -39,6 +39,77 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### A committed browser suite, CI, and a guard on this log · 2026-08-01
+
+**Accomplished**
+
+- **The browser suite exists in the tree now.** `web/tests/`, run with `npm run test:e2e`.
+  Eighteen tests over `@playwright/test`: room creation and the floor's independence from
+  the walls, catalog placement, set-aside/re-import, rotation, doors and windows cutting a
+  wall, floor and wall finishes, and the clearance outlines. Every dev probe in
+  `viewport.ts` — `__crowdedIds`, `__outlines`, `__wallTris`, `__openingCount` and the rest
+  — was written for a suite that did not exist; **this is that suite.** Three separate
+  throwaway drivers were written and thrown away in one session before it landed.
+- **CI runs on every PR** (`.github/workflows/ci.yml`): `cargo test`, `clippy -D warnings`,
+  `tsc --noEmit`, and the browser suite, with the Playwright report kept as an artifact on
+  failure. Nothing re-ran on a PR before this.
+- **A structural guard on `PLAN.md`** (`.github/scripts/check_plan.py`), because four PRs
+  merged in one session and three-quarters of this log silently vanished — every PR green,
+  every merge reporting success. It checks that product changes add an entry, that no
+  existing entry disappears, that headings are unique, that new entries carry a
+  **Remains**, and — the one that matters — **that no two entries share a body**. A
+  heading-presence check cannot see a heading sitting above someone else's body text,
+  which is the exact damage that got past three reviewers. Both checks were validated
+  against the real damage: the disappearance check fires on `b1c7067` against `861d0dc`,
+  and the shared-body check fires on the first restoration attempt.
+- **The WASM build no longer sits inside the server-startup timeout.** `webServer` ran
+  `npm run dev`, which is `npm run wasm && vite` — so a release-mode wasm-pack build of
+  the whole workspace was being measured against a budget meant for booting a dev server.
+  On a loaded machine the build alone blew it, and the run died with
+  `Timed out waiting 240000ms from config.webServer`, which reads like a hang rather than
+  a slow compile. `webServer` now runs bare `vite` and `test:e2e` builds the WASM ahead of
+  Playwright, where a slow or failing build surfaces as a build error with compiler
+  output. CI already split these, so only the local path was affected.
+- **The suite found a bug on its first full run.** Deleting a wall leaves its door
+  floating in mid-air — Rust drops the opening from the document, but
+  `deleteSelectedWall` (`viewport.ts:709`) calls `syncRoomGeometry()` and
+  `rebuildWallPicks()` and never `reconcileOpenings()`, so the pick box, outline and glass
+  pane stay in the scene. Recorded as a `test.fail()` rather than a skip, so the suite is
+  green today and goes red the moment the fix lands without the note being retired.
+- Three environment traps are baked into the config rather than left to be rediscovered:
+  `reuseExistingServer: false` plus `--strictPort`, so a run can never silently test
+  another checkout's dev server; software-GL flags, without which headless WebGL never
+  initialises; and a narrow ignore-list for texture 404s, so CI stays off a third-party
+  CDN while the console guard still fails on real errors.
+
+**Remains**
+
+- **The floating-door leak is unfixed** — one `reconcileOpenings()` call, deliberately not
+  taken here because it lives in a file with two PRs open against it. Pinned by the
+  `test.fail()` above.
+- **`cargo fmt --check` is not in CI and the tree is not `rustfmt`-clean** — 18 hunks
+  across four files, nearly all pre-existing. Landing the sweep while three branches hold
+  those exact files is the one change guaranteed to conflict with all of them, so it is
+  sequenced after they merge: own commit, then the gate.
+- **The browser job takes ~8 minutes on CI against ~27 seconds locally.** Headless
+  Chromium has no GPU, so every frame goes through software GL (swiftshader). Workable at
+  18 tests; it will not stay workable indefinitely, and sharding is the lever when it
+  stops being.
+- **Concurrent suite runs on one machine still degrade badly**, even with the WASM build
+  moved out of the server timeout. Three agents running browser suites at load average
+  8.5 produced a 1.5-hour run with nine `webServer` timeouts and no assertion failures at
+  all. The build/boot split below removes the worst of it, but a shared machine remains a
+  hazard and the symptom still reads as a hang rather than as contention.
+- The suite is **one browser, one room shape**, and it does not drive the Draw flow, the
+  3D pointer-drag path, or camera framing. Wall ids `0`/`1` are assumed from
+  `build_room`'s index assignment, which the resize fix is about to change — those tests
+  should fail loudly rather than quietly retarget when it does.
+- Carried: walkway clearance, door-swing arcs, furniture-vs-wall and furniture-vs-opening
+  clearance; furniture casts no shadow on the floor; `front=+Z` unverified; thumbnails
+  uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; **a real-LiDAR RoomPlan
+  round-trip is still owed** (the synthetic-schema half is in `RESEARCH/`); fps on one
+  machine; resize still wipes hand-added walls and their openings.
+
 ### M2: clearance warnings — furniture that overlaps says so · 2026-08-01
 
 **Accomplished**
