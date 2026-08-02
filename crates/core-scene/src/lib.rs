@@ -457,7 +457,13 @@ mod tests {
         // Still owned by the document — scale/yaw untouched — but out of the room.
         assert_eq!(scene.furnishings.len(), 1);
         assert_eq!(scene.placed_furnishings().count(), 0);
-        assert_eq!(scene.stashed_furnishings().map(|f| f.id).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(
+            scene
+                .stashed_furnishings()
+                .map(|f| f.id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
 
         scene.apply(Command::SetStashed {
             id: 1,

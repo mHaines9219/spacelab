@@ -47,6 +47,68 @@ yet satisfied, and the rows say so rather than rounding up.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### CI: `rustfmt` applied and gated in the same merge · 2026-08-02
+
+**Accomplished**
+
+- **The tree is `rustfmt`-clean and stays that way.** `cargo fmt --all` rewrapped 30 spots
+  across six files in `crates/` — over-width call sites and `assert!`s broken onto their
+  own lines, nothing else. `cargo fmt --all --check` now runs in CI, so the first
+  unformatted line fails the build rather than the hundredth. This was the last item on
+  the standing **Remains** list that was pure housekeeping.
+- **It is a step in the existing `cargo test + clippy` job, not a job of its own** — and
+  that is the load-bearing decision here, not the reformat. A new job would be a new
+  status context, advisory until somebody remembered to add it to the required list. We
+  spent this afternoon discovering that `PR targets main` had sat advisory since #21
+  precisely that way. Folding the check into an already-required job means **the gate is
+  live the moment this merges**, with no window in between and no second hand-maintained
+  list to drift.
+- **The job keeps its now-understated name on purpose, and the workflow says why.**
+  Branch protection matches a required check by its exact name string. Renaming
+  `cargo test + clippy` to something accurate would leave protection requiring a context
+  that never reports again — and a required check that never reports does not fail, it
+  **blocks every PR forever**. That is the same hand-maintained-list drift that hid the
+  advisory guard, in a shape that is worse because it presents as an unexplained hang.
+  Renaming it is a two-step change coordinated with a protection update, noted in
+  `ci.yml` at the job so the next person meets the warning before the trap.
+- **Verified that the reformat changed no behaviour, by compiling it.** 114 Rust tests
+  pass and clippy is clean, but tests only cover what tests cover, so the stronger check
+  was the binary: build the WASM from the formatted and unformatted trees and compare.
+  Both are **261,190 bytes** and they differ in **25 bytes**. Every differing byte sits in
+  the data section among the four embedded `crates/.../src/*.rs` path strings, and the
+  values are small integers shifting by the amount rustfmt moved a line — one reads
+  `244 → 264`. They are the `file:line:col` locations Rust bakes into panic sites. The
+  code section is untouched.
+- **That comparison was wrong the first time and the mistake is worth recording.** The
+  first run stashed in the wrong order and compared the unformatted build against itself,
+  printing `0 differing bytes` — a clean, plausible, meaningless pass. Before trusting the
+  differing result that replaced it, the build was checked for reproducibility at all
+  (two builds of one tree hash identically), because a non-reproducible build makes the
+  whole comparison prove nothing either way. **A byte-comparison between two builds is
+  worthless until you know the build is deterministic**, and a diff of a thing against
+  itself looks exactly like success.
+
+**Remains**
+
+- **`cargo fmt` is gated but invisible in the check list.** The context that enforces it
+  is called `cargo test + clippy`, so someone reading the five required checks cannot see
+  that formatting is among them. The honest fix is the coordinated rename above; until
+  then the workflow comment is the only place that says so.
+- **No `rustfmt.toml`.** The tree is now clean against stock defaults, which is a choice
+  made by not making one — a future disagreement about width or import grouping has
+  nothing written down to appeal to.
+- **The web side has no formatter at all.** `tsc` type-checks and nothing formats;
+  `prettier` is not in the tree. Rust is now held to a standard TypeScript is not.
+- Carried forward, none of it closed here: one autosave slot with no named saves;
+  `localStorage` origin-scoped and silently finite; a furnishing whose catalog entry has
+  vanished is skipped on restore without telling anyone; autosave polls every 400 ms; no
+  share links and no glTF/USDZ export; the unit layer covers only `persistence.ts` and the
+  binding guard; the browser suite is ~12 minutes every PR pays; no migration path, only a
+  version check; the draw tool accepts a self-intersecting polygon; no 2D plan view of an
+  existing room; walkway clearance, door-swing arcs and furniture-vs-wall still open in M2;
+  **camera framing still open in M3**, which its own bullet names, so that row cannot flip
+  until it lands; a real-LiDAR RoomPlan round-trip still owed.
+
 ### M1 ✅ — every deliverable its own bullet names is on `main` · 2026-08-02
 
 **Accomplished**

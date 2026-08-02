@@ -10,14 +10,25 @@ env:
 
 jobs:
   rust:
+    # The name is understated — this job now also checks formatting — and it stays that
+    # way deliberately. Branch protection matches a required check by this exact string,
+    # so renaming the job makes the required context one that never reports again and
+    # every PR blocks forever. Renaming it is a two-step change coordinated with a
+    # protection update, not a free edit.
     name: cargo test + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # A step in this already-required job rather than a job of its own. A new job would
+      # be a new context, advisory until someone flips it — and we have just spent an
+      # afternoon on a guard that sat advisory for hours without anyone noticing. Folding
+      # it in here means the gate is live the moment this merges, with no window and no
+      # second list to keep in sync.
+      - run: cargo fmt --all --check
       - run: cargo test --workspace
       # Warnings fail the build. The tree is clippy-clean today and the cheapest way to
       # keep it that way is to refuse the first warning rather than the hundredth.

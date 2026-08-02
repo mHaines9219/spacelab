@@ -150,10 +150,7 @@ mod tests {
         // turn one a quarter and it reaches 1.6 m across, so it runs into the other.
         let fixed = at(0.0, 0.0, 0.0);
         assert!(!overlaps(&fixed, &at(0.0, 1.0, 0.0)));
-        assert!(overlaps(
-            &fixed,
-            &at(0.0, 1.0, std::f32::consts::FRAC_PI_2)
-        ));
+        assert!(overlaps(&fixed, &at(0.0, 1.0, std::f32::consts::FRAC_PI_2)));
     }
 
     #[test]

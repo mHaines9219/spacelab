@@ -179,7 +179,10 @@ pub fn rooms(scene: &Scene) -> Vec<Room> {
             h = graph.next(h);
         }
 
-        let outline: Vec<Vec2> = face.iter().map(|&h| graph.points[graph.origin(h)]).collect();
+        let outline: Vec<Vec2> = face
+            .iter()
+            .map(|&h| graph.points[graph.origin(h)])
+            .collect();
         // The outside of the graph is the one face that comes back clockwise, and a
         // loop that only walked out along dead ends and back encloses nothing.
         if crate::signed_area2(&outline) <= 2.0 * MIN_AREA {
