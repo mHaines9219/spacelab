@@ -1,5 +1,8 @@
 target/
 node_modules/
+# ...and as a symlink: worktrees often link to a sibling's, and `node_modules/`
+# with the trailing slash matches directories only, so the link itself slips through.
+node_modules
 dist/
 pkg/
 web/src/wasm/

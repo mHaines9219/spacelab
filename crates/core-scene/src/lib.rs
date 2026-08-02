@@ -1,6 +1,7 @@
 //! Parametric scene document: walls, openings, furnishings, and the command layer all mutations flow through.
 
 use glam::{Vec2, Vec3};
+use serde::{Deserialize, Serialize};
 
 pub type WallId = u32;
 pub type FurnishingId = u32;
@@ -13,7 +14,7 @@ pub type OpeningId = u32;
 /// `Drawn` is the default on purpose, and it is the safe direction: a wall of unknown
 /// provenance survives a regenerate. The opposite default would silently delete a user's
 /// walls the first time they resized a room — which is the bug this type exists to fix.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WallOrigin {
     /// Raised by the app from a rectangle or a traced outline. Regenerating replaces it.
     Generated,
@@ -23,7 +24,8 @@ pub enum WallOrigin {
 }
 
 /// Ground-plane coordinates are metres as `Vec2(x, z)`; `Vec3` is `(x, up, z)`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Wall {
     pub id: WallId,
     pub start: Vec2,
@@ -68,15 +70,17 @@ impl Wall {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub enum Anchor {
+    #[default]
     Floor,
     AgainstWall(WallId),
 }
 
 /// A door or window. Ordinal matches the flag the wasm boundary exchanges with the web.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OpeningKind {
+    #[default]
     Door,
     Window,
 }
@@ -84,7 +88,8 @@ pub enum OpeningKind {
 /// A parametric cut *owned by* a wall: a door or window. Position is a distance along
 /// the wall centreline, so moving or resizing the wall carries the opening with it —
 /// the opening never stores world coordinates of its own.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Opening {
     pub id: OpeningId,
     pub wall: WallId,
@@ -109,7 +114,8 @@ impl Opening {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Placement {
     pub position: Vec3,
     pub yaw: f32,
@@ -118,12 +124,21 @@ pub struct Placement {
 
 /// Catalog metadata the constraint solver needs. `extent` is width/height/depth in
 /// metres, with local `+Z` as the asset's front.
-#[derive(Clone, Copy, Debug)]
+// Not `Copy`: `asset_id` is a `String`. Cheap to clone at this scale, and the document
+// owning which catalog entry a furnishing is beats saving a pointer-copy.
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Asset {
     pub extent: Vec3,
+    /// Which catalog entry this is, e.g. `"couch-medium"`. The document owns the
+    /// association because the room is not described by boxes of the right size — it is
+    /// described by *which things* are in it. Before this field the mapping lived only in
+    /// a JavaScript `Map`, so a saved room restored as correctly-sized invisible boxes.
+    pub asset_id: String,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Furnishing {
     pub id: FurnishingId,
     pub asset: Asset,
@@ -140,7 +155,7 @@ pub struct Furnishing {
 /// The floor's surface finish. The document owns the *choice*; the renderer owns
 /// what each finish looks like (which texture, how it tiles). Ordinal matches the
 /// index the wasm boundary exchanges with the web layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum FloorMaterial {
     #[default]
     WoodLight,
@@ -153,7 +168,7 @@ pub enum FloorMaterial {
 /// *choice*, the renderer owns what each finish looks like (here, a tint over the one
 /// shared matte plaster set — walls differ by colour, not by texture). Ordinal matches
 /// the index the wasm boundary exchanges with the web layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WallMaterial {
     /// The fixed off-white the walls carried before finishes were selectable, so an
     /// existing room opens looking exactly as it did.
@@ -169,7 +184,7 @@ pub enum WallMaterial {
 /// renderer owns what each preset means (sun colour, angle and intensity, how much the
 /// environment fills the shadows). Ordinal matches the index the wasm boundary
 /// exchanges with the web layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LightingPreset {
     /// The high neutral sun the scene carried before lighting was selectable.
     #[default]
@@ -179,7 +194,8 @@ pub enum LightingPreset {
     Overcast,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Scene {
     pub walls: Vec<Wall>,
     /// Doors and windows, each owned by a wall (`Opening::wall`). Kept in a flat list
@@ -193,6 +209,23 @@ pub struct Scene {
     /// The room's floor footprint (metres, in loop order). Owned by the document
     /// independently of the walls, so removing a wall never reshapes the floor.
     pub floor_outline: Vec<Vec2>,
+    /// Bumped by every [`Scene::apply`], so a caller can tell "did anything change?"
+    /// by watching one integer rather than instrumenting every mutation site — the
+    /// 32nd site is the one that gets forgotten.
+    ///
+    /// It lives on `Scene` because `apply` is the only funnel that sees every mutation,
+    /// and `apply` can only reach `Scene`. That means undo *rewinds* it, which would let
+    /// a rewind-then-edit reproduce a revision an autosave had already seen and skip the
+    /// write. `Document::replace_scene` is what closes that: every wholesale swap
+    /// advances past the restored value. **`Scene` may rewind; this may only advance.**
+    ///
+    /// **Not persisted.** It is session-local change detection, not part of the room —
+    /// the same room saved after three edits or after three hundred is the same room, and
+    /// a format where those differ is neither diffable nor round-trip testable. On load
+    /// the counter advances from *this* session's value anyway, so the file's is never
+    /// read.
+    #[serde(skip)]
+    pub revision: u64,
 }
 
 pub enum Command {
@@ -262,6 +295,8 @@ impl Scene {
     /// Sole mutation path. Funnelling every edit through one place is what keeps
     /// undo and collaboration a refactor rather than a rewrite.
     pub fn apply(&mut self, command: Command) {
+        // Every mutation, one place. See `Scene::revision`.
+        self.revision += 1;
         match command {
             Command::AddWall(wall) => self.walls.push(wall),
             Command::DeleteWall(id) => {
@@ -372,6 +407,7 @@ mod tests {
             id: 1,
             asset: Asset {
                 extent: Vec3::new(0.83, 0.69, 0.57),
+                asset_id: "sheen-chair".into(),
             },
             placement: Placement {
                 position: Vec3::new(2.0, 0.0, 1.0),
@@ -475,6 +511,7 @@ mod tests {
             id: 2,
             asset: Asset {
                 extent: Vec3::new(1.0, 0.5, 1.0),
+                asset_id: "night-stand".into(),
             },
             placement: Placement {
                 position: Vec3::ZERO,

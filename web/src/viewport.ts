@@ -566,7 +566,11 @@ export async function createViewport(
 
   const addFromCatalog = async (entry: CatalogEntry) => {
     const { w, h, d } = entry.dims_m;
-    const id = doc.add_furnishing(w, h, d);
+    // The catalog id goes into the document, not just this map: `placed` dies with the
+    // page, so a saved room that only knew the box dimensions would restore as
+    // correctly-sized invisible furniture. `placed` stays as the JS-side cache of the
+    // full entry (thumbnail, title, blob url); the document owns *which* entry it is.
+    const id = doc.add_furnishing(entry.asset_id, w, h, d);
     placed.set(id, entry);
     const template = await getTemplate(urlOf(entry));
     selectedId = id; // so the fresh mesh shows its selection box

@@ -105,14 +105,17 @@ mod tests {
 
     /// Wider than it is deep, so a 90° turn changes which way it reaches — the whole
     /// point of testing an oriented box rather than an axis-aligned one.
-    const TABLE: Asset = Asset {
-        extent: Vec3::new(1.6, 0.75, 0.8),
-    };
+    fn table_asset() -> Asset {
+        Asset {
+            extent: Vec3::new(1.6, 0.75, 0.8),
+            asset_id: "round-table".into(),
+        }
+    }
 
     fn at(x: f32, z: f32, yaw: f32) -> Footprint {
         Footprint {
             centre: Vec2::new(x, z),
-            half: Vec2::new(TABLE.extent.x, TABLE.extent.z) * 0.5,
+            half: Vec2::new(table_asset().extent.x, table_asset().extent.z) * 0.5,
             yaw,
         }
     }
@@ -120,7 +123,7 @@ mod tests {
     fn table(id: FurnishingId, x: f32, z: f32, yaw: f32) -> Furnishing {
         Furnishing {
             id,
-            asset: TABLE,
+            asset: table_asset(),
             placement: Placement {
                 position: Vec3::new(x, 0.0, z),
                 yaw,
