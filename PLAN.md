@@ -46,6 +46,80 @@ yet satisfied, and the rows say so rather than rounding up.
 | M5 — Persistence & sharing | 🚧 save/load ✅ **(the MVP slice)** — share links and glTF/USDZ export deferred |
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
+| M7 — Accounts & cloud portfolio | 🚧 foundation — Google sign-in, RLS schema, landing + dashboard landed; provider config + deep editor sync remain |
+
+### M7: accounts, Google sign-in, and a cloud portfolio — the foundation · 2026-08-02
+
+**Accomplished**
+
+- **The app grew a front door, and the editor kept its keys.** `/` is now a landing page
+  (sign in with Google, or skip straight into the editor), `/dashboard` is the signed-in
+  portfolio + settings, and `/editor` is the 3D editor the plan already shipped —
+  deliberately **not** auth-gated. That is the owner's ruling this session made concrete:
+  the product still works with no account, localStorage stays the working store, and the
+  cloud is a **manual** "save to portfolio", not an always-on sync. `react-router` is the
+  only new runtime structure; the editor's internals are untouched but for a thin nav.
+- **A dedicated Supabase project, on purpose.** `spacelab-auth` (us-east-2, $10/mo) is its
+  own project rather than a table namespace inside the existing one, so this whole
+  experiment can be torn down without touching anything else. Schema in one migration:
+  `profiles` (1:1 with `auth.users`, plus a free-form `settings` jsonb), `folders` (the
+  "folder of projects" a user organises into), and `projects` (a saved room). A
+  `security definer` trigger materialises a profile the instant a user signs up.
+- **RLS from the first migration, not bolted on.** Every read and write on all three tables
+  is scoped `(select auth.uid()) = owner`; `owner` defaults to `auth.uid()` so a client
+  cannot even name a different owner. The security advisor was run after the DDL and its
+  three findings closed in a follow-up migration (search_path pinned on both trigger
+  functions, RPC `EXECUTE` revoked so neither is callable over the REST surface).
+- **Rule #1 held across the network.** A project's `document` is the **opaque**
+  `save_json()` envelope, stored as jsonb and never parsed in JavaScript — `portfolio.ts`
+  treats it exactly as `persistence.ts` treats the localStorage copy. The cloud is just
+  another place the same bytes live; no document or geometry logic crossed into the web
+  layer or the database.
+- **The loop closes through a thin editor bridge.** `?project=<id>` opens a portfolio room
+  into the editor (jsonb → `JSON.stringify` → the same `loadJson` a file import uses), and
+  a "save to portfolio" button pushes the current room up via the same `saveJson()` the
+  file export already produces — so the cloud copy is byte-identical to a download. It
+  binds to a project on first save, so re-saving updates in place instead of piling up
+  duplicates.
+- **Absent-tolerant by construction.** With no Supabase env (CI, a fresh clone) `supabase`
+  is `null`, auth degrades to a visible "not configured" state, and the editor is
+  unchanged — which is why the existing 33-spec browser suite needed no key to keep passing.
+- Verified: `tsc` clean; production build green; **4 new browser specs** (landing renders,
+  skip-into-editor, editor still at `/editor`, dashboard gated when signed out) pass, and a
+  representative editor subset — room, furnishing, and the real-reload persistence spec, 18
+  specs — still passes with routing and the new nav in place.
+
+**Remains**
+
+- **Google OAuth is wired in code but not yet mintable — one manual step stands between
+  here and a real sign-in.** Supabase's MCP cannot configure an auth provider, so the
+  Google Cloud OAuth client (id + secret) and Supabase's redirect allowlist are a
+  hand-step, documented in `README.md`. Everything downstream of a session is built; the
+  session itself cannot be issued until that is done, so the end-to-end flow is **untested
+  against a live Google**.
+- **The editor bridge is the thin slice, not the whole integration.** No thumbnails (cards
+  read "no preview"); cloud save is manual and one-shot while the *autosave* is still
+  localStorage-only; no conflict handling if one project is edited in two tabs; and opening
+  `?project` replaces the local working room without the import path's one-deep undo net.
+  Deeper wiring is the fast-follow the owner asked to chart, not to finish here.
+- **This is beyond MVP, and labelled so rather than smuggled in.** Accounts sit in the
+  plan's *Powerful* cloud column and its M6+ expansion; they are being built now as a
+  product direction, not because MVP needs them. **MVP remains M0–M3 + M5.**
+- **Direction after this (the chart the owner asked for):** the model is *manual save now,
+  cloud-first later* — projects become the primary store, localStorage demotes to an
+  offline draft/cache, and each project grows a thumbnail and its own autosave. Folders
+  exist in the schema and dashboard but there is no drag-between-folders yet, and **share
+  links (named in M5) are the natural next cloud slice** and still unbuilt.
+- **A pre-existing local test failure surfaced during verification, and it is not this
+  branch's.** `persistence.test.ts` (12 unit tests) fails locally on
+  `window.localStorage.clear is not a function` — reproduced **identically on a clean
+  `origin/main` worktree with `npm ci`**, so it predates this work (a jsdom-30 storage
+  quirk in this environment; CI's Linux runner resolves it, which is why `main` is green).
+  Flagged because the required `vitest` gate could bite on a developer machine like this
+  one. The other 35 unit tests pass.
+- Carried, unchanged by this PR: the web side still has no formatter; M2 owes walkway
+  clearance and furniture-vs-wall; M5 is the save/load slice only (no share links, no
+  glTF/USDZ export); the browser suite is ~12 minutes every PR pays, now plus 4 auth specs.
 
 ### M2 (content) — a catalog pipeline built to scale to 500, and 11 → 41 to prove it · 2026-08-02
 
@@ -1784,6 +1858,15 @@ React + TypeScript + Vite. A 2D floorplan editor (SVG or canvas2d) and a 3D view
 | **Powerful** | Accounts, cloud documents, share links, GPU render workers (headless Cycles) for 4K stills and walkthrough video. |
 | **MVP** | Local persistence + file export. One upload endpoint for phone scans. No accounts. |
 
+**Status (2026-08-02):** the Powerful row's *accounts + cloud documents* half is now under
+construction as **[M7](#milestones)**, ahead of the MVP sequencing above and on the owner's
+call. It is built to sit *beside* the MVP, not gate it: Supabase (Auth + Postgres + RLS)
+backs Google sign-in and a per-user portfolio, but a room's cloud copy is the same opaque
+`save_json()` envelope, stored as jsonb and never parsed server-side — so [§1's
+rule](#1-scene-document-rust--the-load-bearing-decision) holds across the network. The
+editor still runs signed-out on localStorage; the cloud is a **manual save** today, with
+cloud-first persistence the charted next step.
+
 ---
 
 ## AI: assistive, per your decision
@@ -1817,6 +1900,15 @@ Throwaway code proving the whole seam: Rust→WASM emits wall geometry for two h
 **M5 — Persistence & sharing.** Save/load, share links, image + glTF/USDZ export.
 
 **M6+ — Expansion.** Android capture (ARCore + corner-tap), native desktop shell (`wgpu`), cloud final-render, AI assist, collaboration, brand catalog.
+
+**M7 — Accounts & cloud portfolio.** Google sign-in, per-user profiles and settings, and a
+portfolio of saved rooms grouped into folders — pulling the *Powerful* row of [§6
+Cloud](#6-cloud) forward as its own workstream. Deliberately additive: the editor works
+signed-out on localStorage, and the cloud is a **manual save**, not a sync. Foundation
+(Supabase project, RLS schema, auth, landing, dashboard, a thin editor bridge) landed
+2026-08-02; **direction from here is cloud-first** — projects become the primary store and
+localStorage demotes to an offline draft. Not part of MVP; sequenced after it. Share links
+(also named in M5) fold in here.
 
 **MVP = M0–M3 + M5.** Amended 2026-08-01 (was M0–M4) on the project owner's ruling —
 verbatim, 2026-08-02T00:31:55Z: *"yes skip to M5, lidar, and apple account are not set up,

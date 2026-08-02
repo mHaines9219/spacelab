@@ -8,6 +8,14 @@ interface ImportMetaEnv {
   readonly VITE_OPENROUTER_MODEL?: string;
   /** Optional site URL sent as OpenRouter's HTTP-Referer attribution header. */
   readonly VITE_OPENROUTER_REFERER?: string;
+
+  /** Supabase project URL, e.g. "https://xxxx.supabase.co". Enables accounts + the
+   * cloud portfolio. When either this or the anon key is unset, auth degrades to
+   * "not configured" and the local editor still works — see supabase.ts. */
+  readonly VITE_SUPABASE_URL?: string;
+  /** Supabase anon/publishable key. Safe to ship in the browser; row-level security is
+   * what actually protects data. Read at build time. */
+  readonly VITE_SUPABASE_ANON_KEY?: string;
 }
 
 interface ImportMeta {

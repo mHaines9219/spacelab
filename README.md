@@ -118,3 +118,46 @@ feature never hard-fails. The proposal card shows which one answered.
 > visible to anyone who loads a built site. That is fine for local single-user use; a shared
 > deployment should move the OpenRouter call behind a proxy (it is one `fetch` in
 > `web/src/llmResolver.ts`).
+
+## Accounts & cloud portfolio (optional)
+
+The app has a landing page (`/`) with **Google sign-in**, a **dashboard** (`/dashboard`)
+holding your portfolio of saved rooms in folders plus your settings, and the 3D editor at
+`/editor`. This is **additive**: the editor works with no account — localStorage is still
+the working store — and saving to the cloud is a manual *"save to portfolio"*. With no
+Supabase configured, the sign-in button is disabled and the editor is unaffected.
+
+Backing store is [Supabase](https://supabase.com) (Auth + Postgres with row-level
+security). A saved room's `document` is the same opaque `save_json()` envelope stored as
+`jsonb` — never parsed server-side, so Rust stays the single source of truth.
+
+### 1. Point the app at a Supabase project
+
+Add these to the gitignored `web/.env.local` (the anon/publishable key is safe to ship —
+RLS is what protects data):
+
+```sh
+VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_...     # Project Settings → API → publishable/anon key
+```
+
+The schema (`profiles`, `folders`, `projects` + RLS + a profile-on-signup trigger) lives in
+the project's Supabase migrations. On a fresh project, apply the same DDL (see the
+`accounts_and_portfolio` migration).
+
+### 2. Turn on Google sign-in (a one-time manual step)
+
+Sign-in code is wired, but the Google provider must be configured in two consoles — this
+cannot be scripted from the app:
+
+1. **Google Cloud Console** → *APIs & Services → Credentials* → create an **OAuth 2.0 Client
+   ID** (type: Web application). Add Supabase's callback as an *Authorized redirect URI*:
+   `https://<your-project-ref>.supabase.co/auth/v1/callback`. Copy the **Client ID** and
+   **Client secret**.
+2. **Supabase dashboard** → *Authentication → Providers → Google* → enable it and paste the
+   Client ID + secret. Then under *Authentication → URL Configuration* set the **Site URL**
+   (e.g. `http://localhost:5173`) and add your dev/prod URLs to **Redirect URLs** (the app
+   returns users to `/dashboard` after sign-in).
+
+Restart `npm run dev` after editing `.env.local`. Until step 2 is done, the button appears
+but no real sign-in can complete.
