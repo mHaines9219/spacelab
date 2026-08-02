@@ -95,3 +95,26 @@ after cloning; on later runs `npm run dev` alone is enough.
   `web/public/assets/textures/` (~9 MB).
 - `npm run dev` / `npm run build` rebuild the WASM first (`npm run wasm` does it alone);
   output lands in `web/src/wasm/`.
+
+## AI style search (optional)
+
+The furniture panel has a **"design with AI"** box: describe a look ("a cozy 70s bedroom")
+and it proposes a coherent furniture set plus floor/wall/light finishes, which you review
+and apply. It works with **no setup** — a built-in offline resolver matches your prompt
+against the catalog — and gets better with an LLM.
+
+To route it through a model, add a gitignored `web/.env.local`:
+
+```sh
+VITE_OPENROUTER_API_KEY=sk-or-...            # https://openrouter.ai/keys
+VITE_OPENROUTER_MODEL=openai/gpt-4o-mini     # optional; any OpenRouter model slug
+```
+
+Restart `npm run dev` after adding it. Without the key the app uses the local resolver;
+with it, the model answers and **falls back to the local resolver on any error**, so the
+feature never hard-fails. The proposal card shows which one answered.
+
+> **Note:** `VITE_*` vars are inlined into the browser bundle at build time, so the key is
+> visible to anyone who loads a built site. That is fine for local single-user use; a shared
+> deployment should move the OpenRouter call behind a proxy (it is one `fetch` in
+> `web/src/llmResolver.ts`).

@@ -10,6 +10,7 @@ import {
 } from "./viewport";
 import { DrawEditor } from "./DrawEditor";
 import { CatalogPanel } from "./CatalogPanel";
+import type { StyleProposal } from "./styleSearch";
 import { Bullpen } from "./Bullpen";
 import { createThumbnailer, type Thumbnailer } from "./thumbnailer";
 import {
@@ -132,6 +133,32 @@ export function App() {
     // Only show the room once it is actually restored — `loadJson` resolves after the
     // furnishing meshes load, so this cannot flash an empty room first.
     if (!outcome.ui.empty) setStage("scene");
+  };
+
+  /**
+   * Apply an AI style proposal: set the finishes, then place each furnishing.
+   *
+   * Everything here routes through the same Rust methods a manual finish click or catalog
+   * place uses — this only turns the proposal's *intent* into those calls, so the two
+   * rules hold. Finishes are set first (and the local swatch state synced) so the room
+   * mood is right the moment the pieces drop in. Placement is awaited one at a time
+   * because `addFromCatalog` is async and each drop reads and advances the selection.
+   */
+  const applyStyle = async (proposal: StyleProposal) => {
+    const handle = handleRef.current;
+    if (!handle) return;
+    const { floorIndex, wallIndex, lightingIndex } = proposal.finishes;
+    handle.setFloorMaterial(floorIndex);
+    setFloor(floorIndex);
+    handle.setWallMaterial(wallIndex);
+    setWall(wallIndex);
+    handle.setLighting(lightingIndex);
+    setLighting(lightingIndex);
+    for (const pick of proposal.furniture) {
+      for (let n = 0; n < pick.count; n++) {
+        await handle.addFromCatalog(pick.entry);
+      }
+    }
   };
 
   /** Hand the current room over as a `.json` — also the bug-report attachment. */
@@ -424,6 +451,7 @@ export function App() {
           <CatalogPanel
             thumbnailer={thumbRef.current!}
             onPlace={(entry: CatalogEntry) => handleRef.current?.addFromCatalog(entry)}
+            onApplyStyle={applyStyle}
           />
 
           <Bullpen

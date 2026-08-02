@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CatalogEntry } from "./viewport";
 import type { Thumbnailer } from "./thumbnailer";
+import {
+  FLOOR_LABELS,
+  LIGHT_LABELS,
+  WALL_LABELS,
+  type StyleProposal,
+  type StyleResolver,
+} from "./styleSearch";
+import { defaultResolver } from "./resolver";
 
 const IN_PER_M = 39.3700787;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -15,10 +23,17 @@ const dimsLabel = (d: { w: number; h: number; d: number }) =>
  */
 export function CatalogPanel({
   onPlace,
+  onApplyStyle,
   thumbnailer,
+  resolver = defaultResolver,
 }: {
   onPlace: (entry: CatalogEntry) => void;
+  /** Apply a whole AI proposal: place its furniture and set its finishes. */
+  onApplyStyle: (proposal: StyleProposal) => void | Promise<void>;
   thumbnailer: Thumbnailer;
+  /** Defaults to the app resolver (LLM if a key is configured, else local); overridable
+   * so a test can swap it. */
+  resolver?: StyleResolver;
 }) {
   const [entries, setEntries] = useState<CatalogEntry[]>([]);
   const [query, setQuery] = useState("");
@@ -53,6 +68,12 @@ export function CatalogPanel({
 
   return (
     <div className="catalog">
+      <StyleSearch
+        entries={entries}
+        thumbnailer={thumbnailer}
+        resolver={resolver}
+        onApplyStyle={onApplyStyle}
+      />
       <div className="catalog-head">
         <strong>furniture</strong>
         <input
@@ -95,6 +116,121 @@ export function CatalogPanel({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * AI-assisted style search. The user describes a look ("a cozy 70s bedroom") and the
+ * resolver proposes a coherent set plus floor/wall/light finishes; the user reviews the
+ * proposal and applies it. Applying routes through the same Rust paths a manual place or
+ * finish click uses — this component only produces intent.
+ */
+function StyleSearch({
+  entries,
+  thumbnailer,
+  resolver,
+  onApplyStyle,
+}: {
+  entries: CatalogEntry[];
+  thumbnailer: Thumbnailer;
+  resolver: StyleResolver;
+  onApplyStyle: (proposal: StyleProposal) => void | Promise<void>;
+}) {
+  const [prompt, setPrompt] = useState("");
+  const [proposal, setProposal] = useState<StyleProposal | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const design = async () => {
+    const text = prompt.trim();
+    if (!text || entries.length === 0 || busy) return;
+    setBusy(true);
+    try {
+      setProposal(await resolver(text, entries));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="ai">
+      <div className="ai-head">
+        <strong>design with AI</strong>
+      </div>
+      <div className="ai-input">
+        <input
+          className="ai-prompt"
+          type="text"
+          placeholder="a cozy 70s bedroom…"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && design()}
+        />
+        <button
+          type="button"
+          className="ai-go"
+          disabled={!prompt.trim() || entries.length === 0 || busy}
+          onClick={design}
+        >
+          {busy ? "…" : "design"}
+        </button>
+      </div>
+
+      {proposal && (
+        <div className="ai-proposal">
+          <div className="ai-label">
+            {proposal.styleLabel}
+            <span className="ai-source" title="which resolver produced this">
+              {proposal.source}
+            </span>
+          </div>
+          {proposal.rationale.map((line, i) => (
+            <p key={i} className="ai-why">
+              {line}
+            </p>
+          ))}
+          {proposal.furniture.length > 0 && (
+            <div className="ai-strip">
+              {proposal.furniture.map((p, i) => (
+                <span key={i} className="ai-chip" title={p.entry.title}>
+                  <Thumb
+                    url={`/assets/${p.entry.blob}`}
+                    alt={p.entry.title}
+                    thumbnailer={thumbnailer}
+                  />
+                  {p.count > 1 && <span className="ai-count">×{p.count}</span>}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="ai-finishes">
+            <span>{FLOOR_LABELS[proposal.finishes.floorIndex]}</span>
+            <span>{WALL_LABELS[proposal.finishes.wallIndex]}</span>
+            <span>{LIGHT_LABELS[proposal.finishes.lightingIndex]}</span>
+          </div>
+          <div className="ai-actions">
+            <button
+              type="button"
+              className="ai-apply"
+              disabled={proposal.furniture.length === 0 || busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await onApplyStyle(proposal);
+                  setProposal(null);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              place this set
+            </button>
+            <button type="button" className="reset" onClick={() => setProposal(null)}>
+              dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
