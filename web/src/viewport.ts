@@ -416,6 +416,29 @@ export async function createViewport(
     return load;
   }
 
+  // Furnishing outline colours. Crowding shows whether or not the item is selected — it
+  // is a fact about the room, not about what you happen to have clicked — so a selected
+  // item that does not fit needs its own colour rather than losing one signal to the
+  // other. Two overlapping copies of the same couch are both amber and the panel names
+  // them identically, so without the third colour there is nothing on screen saying
+  // which one a drag or an arrow key will move.
+  const OUTLINE_SELECTED = 0x5b9dff;
+  const OUTLINE_CROWDED = 0xffa53d;
+  const OUTLINE_SELECTED_CROWDED = 0xff5c3d;
+
+  // Ids Rust reports as overlapping another item. The document decides what crowded
+  // means (`core-geometry/src/clearance.rs`); this layer only colours what it is handed.
+  let crowded = new Set<number>();
+
+  // Line width is not a lever here: WebGL renders `LineBasicMaterial` at one pixel
+  // whatever `linewidth` says, so colour carries the whole distinction.
+  const outlineColour = (id: number) =>
+    crowded.has(id)
+      ? id === selectedId
+        ? OUTLINE_SELECTED_CROWDED
+        : OUTLINE_CROWDED
+      : OUTLINE_SELECTED;
+
   // Build the scene object for an id from an already-resolved template (sync).
   const buildFurnishing = (id: number, entry: CatalogEntry, template: THREE.Group) => {
     const group = new THREE.Group();
@@ -424,10 +447,10 @@ export async function createViewport(
     const { w, h, d } = entry.dims_m;
     const box = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
-      new THREE.LineBasicMaterial({ color: 0x5b9dff }),
+      new THREE.LineBasicMaterial({ color: outlineColour(id) }),
     );
     box.position.y = h / 2;
-    box.visible = id === selectedId;
+    box.visible = id === selectedId || crowded.has(id);
     group.add(box);
     scene.add(group);
     furnishings.set(id, { group, box, entry });
@@ -458,11 +481,23 @@ export async function createViewport(
           dims: [...doc.dimensions()] as [number, number, number],
         };
 
+  // Re-read which items overlap and recolour every outline. Cheap enough to call on
+  // each pointer move during a drag: the query is quadratic over a room's worth of
+  // furniture, and the drag path already re-emits geometry per move.
+  const refreshCrowding = () => {
+    crowded = new Set(doc.crowded_ids());
+    for (const [id, f] of furnishings) {
+      f.box.visible = crowded.has(id) || id === selectedId;
+      (f.box.material as THREE.LineBasicMaterial).color.setHex(outlineColour(id));
+    }
+  };
+
   const selectFurnishing = (id: number | null) => {
     selectedId = id;
     if (id === null) doc.deselect();
     else doc.select(id);
-    for (const [fid, f] of furnishings) f.box.visible = fid === id;
+    // Covers add, remove, set-aside, re-import and undo — they all end up here.
+    refreshCrowding();
     onSelection(selectionPayload());
   };
 
@@ -552,7 +587,10 @@ export async function createViewport(
   };
 
   const place = (x: number, z: number) => {
-    if (selectedId !== null) applyTransformFor(selectedId, doc.drag(x, z));
+    if (selectedId === null) return;
+    applyTransformFor(selectedId, doc.drag(x, z));
+    // Live feedback: the warning tracks the item under the cursor as it moves.
+    refreshCrowding();
   };
 
   // Timed in a batch rather than per pointer move: a single call lands under
@@ -729,6 +767,9 @@ export async function createViewport(
       default:
         return;
     }
+    // Only the transform cases reach here; each can turn or resize an item into a
+    // neighbour, so re-check. Escape and unhandled keys returned above.
+    refreshCrowding();
     event.preventDefault();
   };
   window.addEventListener("keydown", onKey);
@@ -884,6 +925,7 @@ export async function createViewport(
   const setDimension = (axis: number, inches: number) => {
     if (selectedId === null) return;
     applyTransformFor(selectedId, doc.set_dimension(axis, inches));
+    refreshCrowding();
     refreshSelection();
   };
 
@@ -899,6 +941,8 @@ export async function createViewport(
       __openingCount?: () => number;
       __wallTris?: () => number;
       __addOpeningOnWall?: (kind: "door" | "window", wallId: number) => number;
+      __crowdedIds?: () => number[];
+      __outlines?: () => { id: number; visible: boolean; colour: number }[];
     };
     probe.__selectedYaw = () =>
       selectedId !== null ? (furnishings.get(selectedId)?.group.rotation.y ?? null) : null;
@@ -910,6 +954,19 @@ export async function createViewport(
       syncRoomGeometry();
       rebuildWallPicks();
     };
+    // Reads the rendered set rather than re-querying Rust, so the e2e test proves the
+    // outlines actually track the document instead of just re-asserting the query.
+    probe.__crowdedIds = () => [...crowded].sort((a, b) => a - b);
+    // Read off the live materials, so an assertion about what the room *looks* like
+    // cannot pass on a stale outline the refresh forgot to recolour.
+    probe.__outlines = () =>
+      [...furnishings.entries()]
+        .map(([id, f]) => ({
+          id,
+          visible: f.box.visible,
+          colour: (f.box.material as THREE.LineBasicMaterial).color.getHex(),
+        }))
+        .sort((a, b) => a.id - b.id);
     probe.__openingCount = () => openings.length;
     probe.__wallTris = () => (wallMesh.geometry.index?.count ?? 0) / 3;
     // Drive a placement at the wall's midpoint, exercising the same snap + rebuild path

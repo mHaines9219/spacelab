@@ -9,6 +9,8 @@ pub use room::{Room, rooms};
 use core_scene::{Anchor, Asset, Opening, Placement, Scene, Wall};
 use glam::{Vec2, Vec3};
 
+pub mod clearance;
+
 /// Spans thinner than this (metres) are dropped rather than emitted as slivers — e.g.
 /// the below-opening strip of a floor-standing door, whose sill is 0.
 const EPS: f32 = 1e-4;

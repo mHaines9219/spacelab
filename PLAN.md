@@ -39,7 +39,109 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
 
-### M3: wall finishes as document state · 2026-08-01
+### M2: clearance warnings — furniture that overlaps says so · 2026-08-01
+
+**Accomplished**
+
+- **The headline M2 gap is closed: overlapping furniture is now flagged.** New
+  `core-geometry/src/clearance.rs` treats each furnishing as an oriented rectangle —
+  `Asset.extent × Furnishing.scale`, turned by its yaw — and answers overlap with a
+  separating-axis test. `crowded(&scene)` returns the ids of every placed item sharing
+  floor with another; bullpen items are excluded, since something set aside is not in the
+  room to collide with. New binding `Document::crowded_ids()`.
+- **Not `parry3d`, and that is a deliberate departure from this plan's named choice.**
+  `parry3d` was never actually a dependency — it appears in the architecture section but
+  in no `Cargo.toml`. Given a free choice: every footprint in this document is an oriented
+  rectangle and the whole scene is prismatic, so a 3D collision stack answers a question
+  we deliberately deferred, against a WASM budget that has to hold the entire app. Wall
+  clearance was already hand-rolled, so SAT is the house style rather than a break from
+  it. **`parry2d` is the revisit** if door-swing arcs ever need swept queries — still not
+  `parry3d`.
+- **The warning is visible, not just queryable.** A crowded item draws its outline
+  whether or not it is selected — crowding is a fact about the room, not about what you
+  clicked. That forces a **third colour**: blue for a selection that fits, amber for a
+  crowded item, and red-orange for one that is *both*. Without it the selection signal is
+  lost exactly when the room is at its most confusing — two overlapping copies of the same
+  couch are both amber and the panel names them identically, so nothing on screen says
+  which one an arrow key will move. (Line weight is not available as a second channel:
+  WebGL renders `LineBasicMaterial` at one pixel regardless of `linewidth`.)
+  `refreshCrowding` recolours from `crowded_ids()`, hung off `selectFurnishing` (which
+  every add / remove / set-aside / re-import / undo path already funnels through) plus the
+  drag, rotate, scale and typed-dimension paths, so the warning tracks the item live under
+  the cursor. Rule #1 holds: Rust decides what crowded means, JS only colours what it is
+  handed.
+- **Dropped the result sort after measuring it.** Sorting `crowded_ids` cost **1.8 KB
+  gzipped** of pulled-in sort machinery to reorder a list that is already in ascending id
+  order and whose only consumer reads it straight into a `Set` — 40,353 B with the sort
+  against 38,595 B without. WASM landed at **38.6 KB gzipped, up from 35.3 KB** on `main`
+  (budget 250 KB). All three builds measured this session through one method, `gzip -n -9`,
+  and quoted in **decimal KB** — the convention the budget and the M0 gate table use.
+  Worth stating outright: read as KiB the same two builds are 37.7 and 34.5, so a ~1 KB
+  disagreement between two entries in this log is usually this and not a regression.
+  Compression settings move these by ~70 B, which is well under the precision anyone
+  should read into them.
+- Verified: **58 Rust tests + clippy clean** (was 46) — 9 in `clearance.rs` covering a
+  rotation that pushes an item into a neighbour it used to clear, a diagonal near-miss
+  that only the *turned* box's own axis separates, flush contact not counting as
+  collision, stashing, and scaling into a neighbour; 3 binding tests covering the
+  staggered drop, set-aside, and that the warning rewinds with undo because nothing caches
+  it. `tsc` clean.
+- **Driven in a real browser, twice, both against the code in `4032915`** (this entry's
+  own commit only touches `PLAN.md`; the four code files are byte-identical). Playwright
+  on headless Chromium.
+  Run one — create room → place three couches one at a time → set aside → re-import:
+  **11/11 checks across three consecutive runs, no console errors.** Run two exercised the
+  thing the first could not, a **real pointer drag**: place two couches, pick one off the
+  canvas, drag it clear, and watch the outlines go `0xffa53d`/`0xff5c3d` (crowded
+  unselected / crowded *and* selected) → `0x5b9dff` with the unselected outline hidden once
+  both fit. Both runs read the **live outline materials** rather than re-querying Rust, so
+  a stale outline the refresh forgot to recolour cannot pass. Screenshots reviewed.
+- Scope of that honestly: **one browser, one room shape, one asset.** The drag run picks
+  its couch by sweeping the canvas for a hit, so it proves the path works, not that it
+  works from any angle. Both drivers are ad-hoc and uncommitted, matching this repo's
+  existing practice of no checked-in e2e — which does mean neither will catch a
+  regression on its own.
+
+**Remains**
+
+- **Warnings only — nothing prevents or resolves an overlap.** Deliberate: M2's own text
+  asks for "clearance warnings", and auto-resolution would fight the user mid-drag. But it
+  does mean the room can still be saved in an impossible state.
+- **No walkway clearance and no door-swing arcs**, both named in M2 and both unbuilt.
+  Walkway is an inflation margin on the same test; door swing needs swept queries and is
+  the case that would justify `parry2d`. Neither is started.
+- **Furniture-vs-wall and furniture-vs-opening crowding are not covered.**
+  `resolve_placement` pushes an item off a wall when it snaps, but an item dropped outside
+  `SNAP_RADIUS` can still intersect one, and nothing notices furniture parked across a
+  doorway.
+- **The staggered drop point is far too small for real catalog furniture** — 0.3 m a step
+  against a 1.964 m couch, so every successive placement *and* every bullpen re-import
+  lands flagged. Pre-existing, and newly visible precisely because the warning surfaces
+  it; the fix is to the placement stagger, not to clearance.
+- **`TOUCH_EPS = 1e-3` is a guess**, chosen so wall-snapped items seated at an exact face
+  offset don't warn on contact. Untuned by hand.
+- **Nothing keeps a furnishing on the floor**, and clearance does not change that — it
+  answers furniture-vs-furniture only. Seen in the browser this session: a couch dragged
+  to the room's open edge ends up half off the floor plane, reported clear, because it is
+  clear *of the other couch*. The default room has walls on two sides only, so two of the
+  four edges have nothing to stop it. A floor-containment test is the obvious companion to
+  this one and is not written.
+- The query is **O(n²), recomputed on every pointer move** during a drag. Correct for one
+  room; a much larger scene would want a broadphase.
+- The warning is **an amber outline and nothing else** — no count, no list of offending
+  pairs, no explanation, no dismiss.
+- Carried: `front=+Z` unverified; thumbnails uncached; KTX2 unbuilt; no redo; rotate/scale
+  undo per-keypress; **RoomPlan USD round-trip still owed** — the synthetic-schema half is
+  in progress separately, but a *real* LiDAR scan (off-axis walls, thickness noise,
+  non-closing loops, confidently-misplaced openings) has still never been through the
+  importer; fps measured on one machine only; resize still rebuilds a rectangle as two
+  walls, wiping hand-added walls. Dev probes now include `__crowdedIds` and `__outlines`.
+- **No committed browser test, still.** The Playwright run above was driven from a
+  throwaway script outside the repo — `playwright` is a `devDependency` and Chromium is
+  installed, but there is no suite in the tree, so nothing re-runs any of this. The dev
+  probes were built for a suite that does not exist. Worth its own PR; it is shared
+  infrastructure rather than any one lane's, and two milestones have now wanted it.
+### M1: mitred wall junctions · 2026-08-01
 
 **Accomplished**
 

@@ -6,7 +6,8 @@
 //! JavaScript" rule.
 
 use core_geometry::{
-    MeshBuffers, floor_mesh, mitre_walls, resolve_placement, seat_opening, wall_mesh,
+    MeshBuffers, clearance::crowded, floor_mesh, mitre_walls, resolve_placement, seat_opening,
+    wall_mesh,
 };
 use core_scene::{
     Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, Opening, OpeningId,
@@ -443,6 +444,13 @@ impl Document {
     /// to its catalog entry to draw a tray card.
     pub fn stashed_ids(&self) -> Vec<u32> {
         self.scene.stashed_furnishings().map(|f| f.id).collect()
+    }
+
+    /// Ids of placed furnishings whose floor footprints overlap another item, ascending.
+    /// The document decides what counts as crowded; the web layer only flags what it is
+    /// handed. Recompute after any edit that moves, turns, resizes or adds an item.
+    pub fn crowded_ids(&self) -> Vec<u32> {
+        crowded(&self.scene)
     }
 
     /// Select a furnishing by id (no-op if it doesn't exist). Selection is UI state,
@@ -1138,5 +1146,65 @@ mod tests {
         assert!(!doc.remove_selected_opening());
         assert!(!doc.set_opening_dimension(0, 40.0));
         assert!(doc.opening_dimensions().is_empty());
+    }
+
+    #[test]
+    fn the_staggered_drop_lands_the_second_chair_crowding_the_first() {
+        let mut doc = Document::new();
+        doc.set_rectangle(6.0, 5.0);
+
+        let first = chair(&mut doc);
+        assert!(
+            doc.crowded_ids().is_empty(),
+            "one chair alone has nothing to crowd"
+        );
+
+        // Placement only staggers by 0.3 m a step, which is well inside a 0.83 m chair —
+        // exactly the "items can freely overlap" gap this query exists to surface.
+        let second = chair(&mut doc);
+        assert_eq!(doc.crowded_ids(), vec![first, second]);
+
+        // Drag the second one clear and the warning goes with it. Well inside the room,
+        // so this tests clearance rather than accidentally testing wall snapping.
+        doc.drag(1.5, 1.5);
+        assert!(doc.crowded_ids().is_empty());
+    }
+
+    #[test]
+    fn setting_a_crowding_chair_aside_clears_the_room() {
+        let mut doc = Document::new();
+        doc.set_rectangle(6.0, 5.0);
+        let first = chair(&mut doc);
+        let second = chair(&mut doc);
+        assert_eq!(doc.crowded_ids(), vec![first, second]);
+
+        assert_eq!(doc.stash_selected(), second as i32);
+        assert!(
+            doc.crowded_ids().is_empty(),
+            "a bullpen item is not in the room to crowd it"
+        );
+
+        // Re-import lands clear rather than back on top: `unstash` un-flags the item
+        // before it reads the drop point, so the stagger counts it in and steps one
+        // further out (0.6 m) than the 0.57 m-deep chair it was overlapping.
+        doc.unstash(second);
+        assert!(doc.crowded_ids().is_empty());
+    }
+
+    #[test]
+    fn crowding_follows_undo_because_it_is_read_from_the_document() {
+        let mut doc = Document::new();
+        doc.set_rectangle(6.0, 5.0);
+        let first = chair(&mut doc);
+        let second = chair(&mut doc);
+        // The web checkpoints once at the drag's start, then streams positions.
+        doc.checkpoint();
+        doc.drag(1.5, 1.5);
+        assert!(doc.crowded_ids().is_empty());
+
+        // Undo the drag and the chairs are back on top of each other. Nothing caches
+        // the warning — it is re-read from the document, so it rewinds with it.
+        assert!(doc.undo());
+        assert_eq!(doc.crowded_ids(), vec![first, second]);
     }
 }
