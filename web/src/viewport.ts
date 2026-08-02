@@ -137,6 +137,23 @@ export type OpeningSelection =
   | { kind: "door" | "window"; dims: [number, number, number] }
   | null;
 
+/** What `Document.load_json` hands back across the boundary. */
+type LoadReport = { ok: boolean; kind: "ok" | "corrupt" | "version"; message: string };
+
+/**
+ * The result of restoring a save envelope.
+ *
+ * `reason` is not only about wording — it decides whether the autosave slot survives.
+ * A corrupt save is cleared, because it will never load and would re-fail every boot.
+ * A `version` save is **kept untouched**: the user may simply be on an older build, and
+ * deleting the only copy of their room because we cannot read it yet is data loss we
+ * caused. Matching on prose to make that call would turn a reworded message into
+ * deleted rooms, which is why the discriminator is a stable `kind` rather than text.
+ */
+export type LoadOutcome =
+  | { ok: true; ui: UndoResult }
+  | { ok: false; reason: "corrupt" | "version" | "ok"; message: string };
+
 export type ViewportHandle = {
   dispose: () => void;
   /** Place a catalog asset in the room and select it. */
@@ -185,6 +202,20 @@ export type ViewportHandle = {
    * nothing to undo.
    */
   undo: () => UndoResult | null;
+  /** The whole document as a versioned save envelope. Rust owns what is in it. */
+  saveJson: () => string;
+  /**
+   * Restore a save envelope and re-sync the view. Resolves only once the furnishing
+   * meshes have finished loading, so a caller that awaits it can honestly say the room
+   * is back. A failed load leaves the previous document untouched.
+   */
+  loadJson: (json: string) => Promise<LoadOutcome>;
+  /**
+   * Monotonic counter over every document mutation, including undo. Autosave watches
+   * this rather than hooking each of the 31 mutation sites in this file — the one that
+   * gets forgotten is the one that silently stops saving.
+   */
+  documentRevision: () => number;
 };
 
 export type UndoResult = {
@@ -457,6 +488,89 @@ export async function createViewport(
   let roomAreasM2: number[] = [];
 
   const urlOf = (entry: CatalogEntry) => `/assets/${entry.blob}`;
+
+  /**
+   * Catalog entries by asset id, fetched once.
+   *
+   * `placed` is the id→entry map the renderer reads, and it dies with the page. A
+   * restored document knows each furnishing's *asset id* but not what that asset looks
+   * like, so rebuilding meshes means resolving ids back through the catalog. Only the
+   * restore path needs this; ordinary placement already has the entry in hand.
+   */
+  let catalogIndex: Map<string, CatalogEntry> | null = null;
+  const catalogById = async () => {
+    if (!catalogIndex) {
+      const entries: CatalogEntry[] = await fetch("/assets/catalog.json").then((r) =>
+        r.json(),
+      );
+      catalogIndex = new Map(entries.map((e) => [e.asset_id, e]));
+    }
+    return catalogIndex;
+  };
+
+  /**
+   * Rebuild every furnishing mesh from a freshly restored document.
+   *
+   * Covers stashed items as well as placed ones — `furnishing_asset_id` resolves across
+   * the whole list, so the bullpen comes back knowing what its cards are instead of a
+   * row of unidentifiable thumbnails.
+   *
+   * Templates are GLB loads, so this is async: a restore is not complete when
+   * `load_json` returns, and the caller must await it before reporting success.
+   */
+  /**
+   * Re-sync the entire view from the document, for the two operations that replace the
+   * scene wholesale: undo and a successful load. Both change everything at once, so
+   * neither can rely on the targeted refreshes that individual edits use.
+   *
+   * Furnishing *meshes* are not rebuilt here — `reconcileFurnishings` can only rebuild
+   * what `placed` already knows, which after a load is nothing. The restore path awaits
+   * `restoreFurnishings` separately for that.
+   */
+  const resyncAll = (): UndoResult => {
+    syncRoomGeometry();
+    rebuildWallPicks();
+    selectWall(null);
+    if (addMode) setAddMode(false);
+    if (openingMode) setAddOpening(null);
+    floorMesh.material = floorMaterials[doc.floor_material()];
+    wallMaterial.color.setHex(WALL_TINTS[doc.wall_material()]);
+    applyLighting(doc.lighting());
+    reconcileFurnishings();
+    // `syncRoomGeometry` already rebuilt the opening proxies from the restored
+    // document, so only the selection is left to clear.
+    selectOpening(null);
+    refreshBullpen();
+    selectFurnishing(null);
+    const hasRoom = doc.has_room();
+    const [minX, minZ, maxX, maxZ] = doc.room_bounds();
+    return {
+      floorIndex: doc.floor_material(),
+      wallIndex: doc.wall_material(),
+      lightingIndex: doc.lighting(),
+      empty: !hasRoom,
+      room: hasRoom ? { widthM: maxX - minX, depthM: maxZ - minZ } : null,
+    };
+  };
+
+  const restoreFurnishings = async () => {
+    const byId = await catalogById();
+    const ids = [...doc.furnishing_ids(), ...doc.stashed_ids()];
+    const needed = new Set<string>();
+    for (const id of ids) {
+      const entry = byId.get(doc.furnishing_asset_id(id));
+      // An asset the catalog no longer carries is skipped rather than fatal: one
+      // retired model should cost that item, not the whole room.
+      if (!entry) continue;
+      placed.set(id, entry);
+      needed.add(urlOf(entry));
+    }
+    // Warm every template first so `reconcileFurnishings` finds them all synchronously
+    // and the room appears at once rather than item by item.
+    await Promise.all([...needed].map((url) => getTemplate(url)));
+    reconcileFurnishings();
+    refreshBullpen();
+  };
 
   async function getTemplate(url: string): Promise<THREE.Group> {
     const cached = templates.get(url);
@@ -1137,30 +1251,22 @@ export async function createViewport(
     setOpeningDimension,
     undo: () => {
       if (!doc.undo()) return null;
-      // Undo can touch anything, so re-sync the whole scene from the restored document.
-      syncRoomGeometry();
-      rebuildWallPicks();
-      selectWall(null);
-      if (addMode) setAddMode(false);
-      if (openingMode) setAddOpening(null);
-      floorMesh.material = floorMaterials[doc.floor_material()];
-      wallMaterial.color.setHex(WALL_TINTS[doc.wall_material()]);
-      applyLighting(doc.lighting());
-      reconcileFurnishings();
-      // Undo can add, remove or move any opening; `syncRoomGeometry` above already
-      // rebuilt the proxies from the restored document, so only the selection is left.
-      selectOpening(null);
-      refreshBullpen();
-      selectFurnishing(null);
-      const hasRoom = doc.has_room();
-      const [minX, minZ, maxX, maxZ] = doc.room_bounds();
-      return {
-        floorIndex: doc.floor_material(),
-        wallIndex: doc.wall_material(),
-        lightingIndex: doc.lighting(),
-        empty: !hasRoom,
-        room: hasRoom ? { widthM: maxX - minX, depthM: maxZ - minZ } : null,
-      };
+      return resyncAll();
+    },
+    saveJson: () => doc.save_json(),
+    documentRevision: () => doc.revision(),
+    loadJson: async (json) => {
+      const outcome = doc.load_json(json) as LoadReport;
+      // Rust guarantees a failed load leaves the document untouched, so there is
+      // nothing to roll back here — the previous room is still on screen.
+      if (!outcome.ok) {
+        return { ok: false, reason: outcome.kind, message: outcome.message };
+      }
+      const ui = resyncAll();
+      // Templates are GLB loads, so the room is not actually restored until this
+      // settles. Awaiting it is what makes "restored" mean the user can see it.
+      await restoreFurnishings();
+      return { ok: true, ui };
     },
   };
 }

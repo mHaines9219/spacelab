@@ -12,6 +12,22 @@ import { DrawEditor } from "./DrawEditor";
 import { CatalogPanel } from "./CatalogPanel";
 import { Bullpen } from "./Bullpen";
 import { createThumbnailer, type Thumbnailer } from "./thumbnailer";
+import {
+  clearSaved,
+  createAutosave,
+  downloadJson,
+  readFileAsText,
+  readSaved,
+  stashPrevious,
+  type Autosave,
+} from "./persistence";
+
+/**
+ * How often to check the document's revision counter. Cheap — one integer across the
+ * wasm boundary — and it only schedules a debounced write, so this interval governs how
+ * quickly an edit becomes *eligible* to save, not how often anything is serialised.
+ */
+const REVISION_POLL_MS = 400;
 
 const M_PER_FT = 0.3048;
 const M_PER_IN = 0.0254;
@@ -46,6 +62,11 @@ export function App() {
   const [lighting, setLighting] = useState(0);
   const [bullpen, setBullpen] = useState<BullpenItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /** Transient, non-fatal message — a save that could not be read or written. */
+  const [notice, setNotice] = useState<string | null>(null);
+  const autosaveRef = useRef<Autosave | null>(null);
+  const revisionPollRef = useRef<number | undefined>(undefined);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // One offscreen thumbnail renderer, shared by the catalog and the bullpen so a
   // re-import's card hits the cache the catalog already warmed.
@@ -65,11 +86,141 @@ export function App() {
       setOpeningMode,
       setBullpen,
     ).then(
-      (handle) => (handleRef.current = handle),
+      async (handle) => {
+        handleRef.current = handle;
+        await restoreSavedRoom(handle);
+        startAutosave(handle);
+      },
       (cause) => setError(String(cause)),
     );
-    return () => handleRef.current?.dispose();
+    return () => {
+      if (revisionPollRef.current !== undefined) clearInterval(revisionPollRef.current);
+      autosaveRef.current?.dispose();
+      handleRef.current?.dispose();
+    };
   }, []);
+
+  /**
+   * Bring back the autosaved room, if there is one that loads.
+   *
+   * A save we cannot read must never brick the boot — the user gets an empty room and a
+   * sentence, not a white screen. The two failures are handled differently on purpose:
+   * a **corrupt** slot is cleared, because it will never load and would re-fail on every
+   * future boot; a **version** slot is kept untouched, because the user may simply be on
+   * an older build and deleting their only room because we cannot read it yet would be
+   * data loss we caused.
+   */
+  const restoreSavedRoom = async (handle: ViewportHandle) => {
+    const saved = readSaved();
+    if (!saved) return;
+    const outcome = await handle.loadJson(saved);
+    if (!outcome.ok) {
+      if (outcome.reason === "corrupt") clearSaved();
+      setNotice(
+        outcome.reason === "version"
+          ? "This room was saved by a newer version of Spacelab, so it was left alone."
+          : "Your saved room could not be read, so it has been cleared.",
+      );
+      return;
+    }
+    setFloor(outcome.ui.floorIndex);
+    setWall(outcome.ui.wallIndex);
+    setLighting(outcome.ui.lightingIndex);
+    if (!outcome.ui.empty && outcome.ui.room) {
+      setRoom({ ...outcome.ui.room, square: false });
+    }
+    // Only show the room once it is actually restored — `loadJson` resolves after the
+    // furnishing meshes load, so this cannot flash an empty room first.
+    if (!outcome.ui.empty) setStage("scene");
+  };
+
+  /** Hand the current room over as a `.json` — also the bug-report attachment. */
+  const exportRoom = () => {
+    const handle = handleRef.current;
+    if (!handle) return;
+    // Flush first so the file matches what the user sees rather than the last idle state.
+    autosaveRef.current?.flush();
+    downloadJson(handle.saveJson());
+  };
+
+  /**
+   * Replace the room from a file the user picks.
+   *
+   * Confirmed first, because **a load clears the undo history** — it has to, since a load
+   * is the only operation that moves an id allocator backwards, and a rewound scene beside
+   * a forward allocator would hand out ids that already exist. That makes import the one
+   * destructive action with no way back, so the current room is copied to a one-deep
+   * previous slot before it is replaced. Undo cannot reach across a load; that slot can.
+   */
+  const importRoom = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset the input so choosing the same file twice still fires a change event.
+    event.target.value = "";
+    const handle = handleRef.current;
+    if (!file || !handle) return;
+
+    const hasRoom = stage === "scene";
+    if (hasRoom && !window.confirm("Replace the current room? This cannot be undone.")) {
+      return;
+    }
+
+    let json: string;
+    try {
+      json = await readFileAsText(file);
+    } catch {
+      setNotice("That file could not be read.");
+      return;
+    }
+
+    // The net goes down before the room changes, and proceeding without one is better
+    // than refusing the import — but the user is told, because a UI that implies a
+    // recoverable import when none was saved is worse than offering nothing.
+    const netSaved = hasRoom ? stashPrevious(handle.saveJson()) : true;
+
+    const outcome = await handle.loadJson(json);
+    if (!outcome.ok) {
+      setNotice(
+        outcome.reason === "version"
+          ? "That room was saved by a newer version of Spacelab and cannot be opened here."
+          : "That file is not a Spacelab room.",
+      );
+      return;
+    }
+    setFloor(outcome.ui.floorIndex);
+    setWall(outcome.ui.wallIndex);
+    setLighting(outcome.ui.lightingIndex);
+    setRoom(outcome.ui.room ? { ...outcome.ui.room, square: false } : null);
+    setStage(outcome.ui.empty ? "choose" : "scene");
+    setNotice(
+      netSaved ? null : "Imported — but the previous room could not be set aside first.",
+    );
+    // The imported room is now the document, so let it become the autosave too.
+    autosaveRef.current?.markDirty();
+  };
+
+  /**
+   * Autosave, driven by the document's own revision counter.
+   *
+   * Watching one integer rather than hooking each mutation site is deliberate: there are
+   * 31 of them in `viewport.ts`, and the one that gets forgotten is the one that silently
+   * stops saving. The counter advances on undo too, so undoing an edit is itself saved —
+   * otherwise closing the tab would bring the undone edit back.
+   */
+  const startAutosave = (handle: ViewportHandle) => {
+    const auto = createAutosave(
+      () => handle.saveJson(),
+      () => setNotice("Your room could not be saved — browser storage is full."),
+    );
+    autosaveRef.current = auto;
+    let seen = handle.documentRevision();
+    revisionPollRef.current = window.setInterval(() => {
+      const now = handleRef.current?.documentRevision();
+      if (now !== undefined && now !== seen) {
+        seen = now;
+        auto.markDirty();
+      }
+    }, REVISION_POLL_MS);
+  };
 
   // Cmd/Ctrl+Z undoes the last action. Skipped while a text field is focused so the
   // browser's own text undo still works there.
@@ -103,6 +254,20 @@ export function App() {
   return (
     <>
       <canvas ref={canvasRef} />
+
+      {notice && (
+        <div className="banner" role="status">
+          {notice}
+          <button
+            type="button"
+            className="reset"
+            onClick={() => setNotice(null)}
+            aria-label="dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {stage === "choose" && <ChooseScreen onPick={setStage} />}
 
@@ -153,6 +318,23 @@ export function App() {
             >
               new floor plan
             </button>
+            <button type="button" className="reset" onClick={exportRoom}>
+              export room
+            </button>
+            <button
+              type="button"
+              className="reset"
+              onClick={() => importInputRef.current?.click()}
+            >
+              import room
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: "none" }}
+              onChange={importRoom}
+            />
             <button
               type="button"
               className="reset"

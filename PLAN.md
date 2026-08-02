@@ -35,9 +35,77 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
 | M3 — Look | 🚧 (renderer basics landed early, during M1) |
-| M5 — Persistence & sharing | ⬜ **in MVP** |
+| M5 — Persistence & sharing | 🚧 save/load ✅ **(the MVP slice)** — share links and glTF/USDZ export deferred |
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
+
+### M5: a refresh no longer eats the room · 2026-08-02
+
+**Accomplished**
+
+- **Persistence reaches the user.** The save format is wired into the browser: the room
+  restores on boot, autosaves as it changes, and can be exported and imported as a
+  `.json`. This is the milestone `PLAN.md` has been waiting on since PR #1 — its own
+  acceptance test (*hand it to someone who has never used Blender and watch them lay out
+  their bedroom*) could not honestly be run while a refresh ate their work.
+- **Restore rebuilds the furniture, not just the document.** Each id resolves through
+  `furnishing_asset_id` to a catalog entry, repopulating the id→entry map the renderer
+  reads. That map dies with the page, so without this a restored room came back as
+  correctly-sized **invisible boxes with no error** — the worst shape of failure, because
+  it looks like it worked. Stashed items resolve the same way, so the bullpen survives a
+  reload; that was a named **Remains** item and it is now closed.
+- **`loadJson` resolves only after the GLB templates load**, so "restored" means the user
+  can see it rather than that the document changed. Restore is genuinely async and
+  reporting success early would flash an empty room.
+- **Autosave watches the document's revision counter**, not the 31 mutation call sites in
+  `viewport.ts` — the one that gets forgotten is the one that silently stops saving. The
+  counter advances on undo, so **an undone edit stays undone across a reload**; without
+  that, a user watches something disappear and gets it back on refresh.
+- **A save that cannot be read never bricks the boot** — empty room plus a message. The
+  two failures take *different actions*, not just different words: a **corrupt** slot is
+  cleared, because it will never load and would re-fail every boot; a **newer-version**
+  slot is kept untouched, because the user may simply be on an older build and deleting
+  their only room because we cannot read it yet would be data loss we caused. That is why
+  the binding returns a stable `kind` rather than a message to match on.
+- **Import confirms, then copies the room to a one-deep `previous` slot.** A load clears
+  the undo history — it must, since a load is the only operation that moves an id
+  allocator *backwards* — so import is otherwise the one destructive action with no way
+  back. If that copy fails on quota the import still proceeds, but the caller is told:
+  a UI claiming a safety net that was never written is worse than offering none.
+- `undo` and `load` now share one `resyncAll` rather than two copies that drift apart.
+- Verified: **17 unit tests** (`vitest`, storage failures forced by replacing the
+  accessor), **4 committed browser specs** driving a **real page reload**, 114 Rust
+  tests, `tsc` clean. The reload spec asserts on rendered outlines as well as counts,
+  because `__furnishingCount` reads the document and would report the right number even
+  if nothing rendered.
+
+**Remains**
+
+- **One autosave slot, no named saves and no history.** A second room means overwriting
+  the first, and `previous` is one deep — a second unwanted import loses the first
+  rescue.
+- **`localStorage` is origin-scoped and silently finite.** Nothing warns as a room grows
+  toward the quota; the failure surfaces only when a write is refused, and the room is
+  fine in memory until the tab closes.
+- **A furnishing whose catalog entry has disappeared is skipped on restore**, so a
+  retired asset costs that item silently rather than failing the room. Deliberate, but
+  nothing tells the user an item was dropped.
+- **Autosave polls the revision counter every 400 ms.** Cheap, but it is a poll rather
+  than a signal, and an edit made in the last instant before a crash can still be lost —
+  the flush covers tab-hide, not power loss.
+- **No share links and no glTF/USDZ export.** M5 names both; this is the local-persistence
+  half only.
+- **The `vitest` enforcement flip is still owed.** This PR takes the job from 5 tests to
+  17, but the context is advisory until it joins the required list, so a red unit job
+  still does not stop a merge. Carried from the entry below rather than assumed closed by
+  the tests arriving — more tests running advisory is not the same as gated.
+- Carried: the unit layer still covers only `persistence.ts` and the binding guard, so the
+  job enforces what exists rather than implying coverage; the browser suite is ~9 minutes
+  every PR pays, with sharding the untaken lever; `cargo fmt` still ungated and the tree
+  not `rustfmt`-clean; no migration path, only a version check — v1 refuses a v2 file and
+  nothing upgrades one; walkway clearance, door-swing arcs and furniture-vs-wall still
+  open in M2; camera framing still open in M3; no 2D plan view of an existing room; a
+  real-LiDAR RoomPlan round-trip still owed.
 
 ### CI: the unit layer is gated, not just present · 2026-08-02
 
