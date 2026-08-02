@@ -34,81 +34,73 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
-| M3 — Look | 🚧 |
+| M3 — Look | 🚧 (renderer basics landed early, during M1) |
 | M5 — Persistence & sharing | ⬜ **in MVP** |
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
-### A committed browser suite, CI, and a guard on this log · 2026-08-01
+### M3: lighting presets as document state · 2026-08-01
 
 **Accomplished**
 
-- **The browser suite exists in the tree now.** `web/tests/`, run with `npm run test:e2e`.
-  Eighteen tests over `@playwright/test`: room creation and the floor's independence from
-  the walls, catalog placement, set-aside/re-import, rotation, doors and windows cutting a
-  wall, floor and wall finishes, and the clearance outlines. Every dev probe in
-  `viewport.ts` — `__crowdedIds`, `__outlines`, `__wallTris`, `__openingCount` and the rest
-  — was written for a suite that did not exist; **this is that suite.** Three separate
-  throwaway drivers were written and thrown away in one session before it landed.
-- **CI runs on every PR** (`.github/workflows/ci.yml`): `cargo test`, `clippy -D warnings`,
-  `tsc --noEmit`, and the browser suite, with the Playwright report kept as an artifact on
-  failure. Nothing re-ran on a PR before this.
-- **A structural guard on `PLAN.md`** (`.github/scripts/check_plan.py`), because four PRs
-  merged in one session and three-quarters of this log silently vanished — every PR green,
-  every merge reporting success. It checks that product changes add an entry, that no
-  existing entry disappears, that headings are unique, that new entries carry a
-  **Remains**, and — the one that matters — **that no two entries share a body**. A
-  heading-presence check cannot see a heading sitting above someone else's body text,
-  which is the exact damage that got past three reviewers. Both checks were validated
-  against the real damage: the disappearance check fires on `b1c7067` against `861d0dc`,
-  and the shared-body check fires on the first restoration attempt.
-- **The WASM build no longer sits inside the server-startup timeout.** `webServer` ran
-  `npm run dev`, which is `npm run wasm && vite` — so a release-mode wasm-pack build of
-  the whole workspace was being measured against a budget meant for booting a dev server.
-  On a loaded machine the build alone blew it, and the run died with
-  `Timed out waiting 240000ms from config.webServer`, which reads like a hang rather than
-  a slow compile. `webServer` now runs bare `vite` and `test:e2e` builds the WASM ahead of
-  Playwright, where a slow or failing build surfaces as a build error with compiler
-  output. CI already split these, so only the local path was affected.
-- **The suite found a bug on its first full run.** Deleting a wall leaves its door
-  floating in mid-air — Rust drops the opening from the document, but
-  `deleteSelectedWall` (`viewport.ts:709`) calls `syncRoomGeometry()` and
-  `rebuildWallPicks()` and never `reconcileOpenings()`, so the pick box, outline and glass
-  pane stay in the scene. Recorded as a `test.fail()` rather than a skip, so the suite is
-  green today and goes red the moment the fix lands without the note being retired.
-- Three environment traps are baked into the config rather than left to be rediscovered:
-  `reuseExistingServer: false` plus `--strictPort`, so a run can never silently test
-  another checkout's dev server; software-GL flags, without which headless WebGL never
-  initialises; and a narrow ignore-list for texture 404s, so CI stays off a third-party
-  CDN while the console guard still fails on real errors.
+- **The room takes a lighting mood, and the document owns the choice.** New
+  `LightingPreset` enum (`Noon`, `Morning`, `Evening`, `Overcast`) + a `SetLighting`
+  command on the `Scene` — the third use of the same shape as `FloorMaterial` and
+  `WallMaterial`, so **Rule #1 holds**: Rust owns *which* mood is chosen, the renderer
+  owns what it means (sun colour, angle, intensity, and how much the environment fills
+  the shadows). Undo comes free from the shared `apply` funnel. New binding methods
+  `lighting` / `set_lighting`; the picker grew a third row.
+- **The default is now the single source of the opening lighting.** The sun position and
+  `environmentIntensity` used to be literals at construction; they are applied from the
+  preset instead.
+- **The room was lighting itself like an on-camera flash, and that is fixed here.** The
+  default sun sat at `(3.5, 6, 4.5)` and the default camera sits at `(5.4, 3.4, 5.2)` —
+  the same azimuth within a few degrees. Every shadow therefore fell directly away from
+  the viewer and hid behind the object that cast it, so the room rendered its shadows
+  correctly and showed you none of them. Investigated as "shadows are broken": the
+  shadow map allocates, the sun is in the scene and contributes, casters and receivers
+  are flagged, and a minimal scene through the same renderer casts fine — moving the sun
+  to the far side of the room produces a correct shadow immediately. **Every preset now
+  keeps the key light off the camera's azimuth**, which is what makes the moods legible.
+  Consequently index 0 is *not* the old sun position; the default room now reads with
+  depth rather than flat.
+- Low-sun moods raise the environment fill rather than leaving the room half-black, and
+  `Overcast` carries almost all its light there.
+- Verified: **94 Rust tests + clippy clean** (scene-level default/set and
+  floor-wall-lighting independence; binding-level undo-reverts-lighting-without-touching-
+  the-finishes and out-of-range ordinal clamping). `tsc` clean. Drove the real app in
+  Chromium: create room → place a chair → all four moods → finish swap → undo,
+  **15/15 checks, no console errors**, with each mood asserted to render a
+  byte-distinct canvas rather than merely flipping a button.
 
 **Remains**
 
-- **The floating-door leak is unfixed** — one `reconcileOpenings()` call, deliberately not
-  taken here because it lives in a file with two PRs open against it. Pinned by the
-  `test.fail()` above.
-- **`cargo fmt --check` is not in CI and the tree is not `rustfmt`-clean** — 18 hunks
-  across four files, nearly all pre-existing. Landing the sweep while three branches hold
-  those exact files is the one change guaranteed to conflict with all of them, so it is
-  sequenced after they merge: own commit, then the gate.
-- **The browser job takes ~8 minutes on CI against ~27 seconds locally.** Headless
-  Chromium has no GPU, so every frame goes through software GL (swiftshader). Workable at
-  18 tests; it will not stay workable indefinitely, and sharding is the lever when it
-  stops being.
-- **Concurrent suite runs on one machine still degrade badly**, even with the WASM build
-  moved out of the server timeout. Three agents running browser suites at load average
-  8.5 produced a 1.5-hour run with nine `webServer` timeouts and no assertion failures at
-  all. The build/boot split below removes the worst of it, but a shared machine remains a
-  hazard and the symptom still reads as a hang rather than as contention.
-- The suite is **one browser, one room shape**, and it does not drive the Draw flow, the
-  3D pointer-drag path, or camera framing. Wall ids `0`/`1` are assumed from
-  `build_room`'s index assignment, which the resize fix is about to change — those tests
-  should fail loudly rather than quietly retarget when it does.
-- Carried: walkway clearance, door-swing arcs, furniture-vs-wall and furniture-vs-opening
-  clearance; furniture casts no shadow on the floor; `front=+Z` unverified; thumbnails
-  uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; **a real-LiDAR RoomPlan
-  round-trip is still owed** (the synthetic-schema half is in `RESEARCH/`); fps on one
-  machine; resize still wipes hand-added walls and their openings.
+- **The moods are hand-picked, not derived.** Sun colour, angle and fill are tuned by eye
+  against one room size on one machine, not computed from a time of day. Two of the four
+  differ more in tint than in shadow direction.
+- **The lateral offsets are constrained by the default room's two walls.** Because those
+  walls sit on the -x/-z edges, a low sun from that side is blocked and floods the floor
+  with wall shadow, so every preset lights from over the open +x/+z sides. A room whose
+  walls were added elsewhere — or a traced polygon — has no such guarantee, and nothing
+  adapts the key light to the actual footprint.
+- **No time-of-day slider and no per-light control** — four fixed presets, deliberately.
+  Artificial/interior lights (lamps as light sources rather than props) are absent.
+- **Camera framing — the last M3 item — is untouched.** It still only reframes to the
+  footprint on geometry change. Worth noting the two are coupled: the key light is placed
+  relative to where the camera *starts*, so once the user orbits, the flattering angle is
+  no longer guaranteed. Nothing re-keys the light to the current view.
+- The floating-door bug (a deleted wall leaving its openings behind) is **not** fixed
+  here. It was fixed twice simultaneously; the structural version — pairing
+  `rebuildOpenings` into `syncRoomGeometry` itself so a new call site cannot reintroduce
+  it — went in separately, and this branch's narrower two-call-site version was dropped
+  rather than merged alongside it.
+- The verification screenshots were reviewed by eye; nothing pins the moods against
+  reference images, so a preset could drift without a test noticing.
+- Carried: per-wall material still waits on a `shell_mesh` split; walkway clearance,
+  door-swing arcs and furniture-vs-wall still open in M2; resize still wipes hand-added
+  walls and their openings; `front=+Z` unverified; thumbnails uncached; KTX2 unbuilt; no
+  redo; rotate/scale undo per-keypress; RoomPlan real-scan validation still owed; nothing
+  persists yet (M5); fps measured on one machine.
 
 ### M2: clearance warnings — furniture that overlaps says so · 2026-08-01
 

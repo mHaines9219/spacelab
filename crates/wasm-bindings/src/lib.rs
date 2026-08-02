@@ -10,8 +10,8 @@ use core_geometry::{
     wall_mesh,
 };
 use core_scene::{
-    Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, Opening, OpeningId,
-    OpeningKind, Placement, Scene, Wall, WallMaterial,
+    Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, LightingPreset, Opening,
+    OpeningId, OpeningKind, Placement, Scene, Wall, WallMaterial,
 };
 use glam::{Vec2, Vec3};
 use wasm_bindgen::prelude::*;
@@ -335,6 +335,26 @@ impl Document {
         self.checkpoint();
         self.scene.apply(Command::SetWallMaterial(material));
         self.wall_material()
+    }
+
+    // --- Lighting ----------------------------------------------------------
+
+    /// Current lighting mood as an ordinal matching `LightingPreset`.
+    pub fn lighting(&self) -> u8 {
+        self.scene.lighting as u8
+    }
+
+    /// Choose the lighting mood by ordinal; returns the resulting ordinal.
+    pub fn set_lighting(&mut self, index: u8) -> u8 {
+        let preset = match index {
+            0 => LightingPreset::Noon,
+            1 => LightingPreset::Morning,
+            2 => LightingPreset::Evening,
+            _ => LightingPreset::Overcast,
+        };
+        self.checkpoint();
+        self.scene.apply(Command::SetLighting(preset));
+        self.lighting()
     }
 
     // --- Furnishing catalog & selection -----------------------------------
@@ -858,12 +878,34 @@ mod tests {
         assert_eq!(doc.wall_count(), 2, "the room is untouched by a finish change");
     }
 
-    /// Out-of-range ordinals clamp to the last finish rather than panicking, matching
+    /// Out-of-range ordinals clamp to the last variant rather than panicking, matching
     /// `set_floor_material`'s catch-all arm.
     #[test]
-    fn an_out_of_range_wall_finish_ordinal_clamps() {
+    fn out_of_range_finish_and_lighting_ordinals_clamp() {
         let mut doc = Document::new();
         assert_eq!(doc.set_wall_material(99), 4);
+        assert_eq!(doc.set_lighting(99), 3);
+    }
+
+    /// Lighting rides the same funnel, so undo covers it — and it is independent of
+    /// both finishes.
+    #[test]
+    fn lighting_is_selectable_and_undoable_without_touching_the_finishes() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        assert_eq!(doc.lighting(), 0);
+
+        doc.set_floor_material(2);
+        doc.set_wall_material(3);
+        assert_eq!(doc.set_lighting(2), 2);
+        assert_eq!(doc.floor_material(), 2);
+        assert_eq!(doc.wall_material(), 3);
+
+        // Undo the lighting only: mood reverts, both finishes keep their choice.
+        assert!(doc.undo());
+        assert_eq!(doc.lighting(), 0);
+        assert_eq!(doc.floor_material(), 2);
+        assert_eq!(doc.wall_material(), 3);
     }
 
     #[test]

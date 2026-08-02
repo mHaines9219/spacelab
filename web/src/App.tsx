@@ -43,6 +43,7 @@ export function App() {
   const [openingMode, setOpeningMode] = useState<"door" | "window" | null>(null);
   const [floor, setFloor] = useState(0);
   const [wall, setWall] = useState(0);
+  const [lighting, setLighting] = useState(0);
   const [bullpen, setBullpen] = useState<BullpenItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,6 +89,7 @@ export function App() {
       }
       setFloor(result.floorIndex);
       setWall(result.wallIndex);
+      setLighting(result.lightingIndex);
       setRoom((prev) =>
         prev && result.room
           ? { ...prev, widthM: result.room.widthM, depthM: result.room.depthM }
@@ -251,6 +253,7 @@ export function App() {
           <FinishPicker
             floor={floor}
             wall={wall}
+            lighting={lighting}
             onPickFloor={(i) => {
               handleRef.current?.setFloorMaterial(i);
               setFloor(i);
@@ -258,6 +261,10 @@ export function App() {
             onPickWall={(i) => {
               handleRef.current?.setWallMaterial(i);
               setWall(i);
+            }}
+            onPickLighting={(i) => {
+              handleRef.current?.setLighting(i);
+              setLighting(i);
             }}
           />
         </>
@@ -561,22 +568,33 @@ function DimensionField({
 // `WallMaterial`), and the look it maps to lives in the viewport.
 const FLOORS = ["Light wood", "Dark wood", "Tile", "Concrete"] as const;
 const WALLS = ["Warm white", "Cool grey", "Greige", "Sage", "Clay"] as const;
+const LIGHTING = ["Noon", "Morning", "Evening", "Overcast"] as const;
 
 function FinishPicker({
   floor,
   wall,
+  lighting,
   onPickFloor,
   onPickWall,
+  onPickLighting,
 }: {
   floor: number;
   wall: number;
+  lighting: number;
   onPickFloor: (index: number) => void;
   onPickWall: (index: number) => void;
+  onPickLighting: (index: number) => void;
 }) {
   return (
     <div className="floors">
       <SwatchRow label="floor" options={FLOORS} active={floor} onPick={onPickFloor} />
       <SwatchRow label="walls" options={WALLS} active={wall} onPick={onPickWall} />
+      <SwatchRow
+        label="light"
+        options={LIGHTING}
+        active={lighting}
+        onPick={onPickLighting}
+      />
     </div>
   );
 }
