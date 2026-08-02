@@ -14,6 +14,7 @@ use core_scene::{
     OpeningId, OpeningKind, Placement, Scene, Wall, WallId, WallMaterial, WallOrigin,
 };
 use glam::{Vec2, Vec3};
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 const SNAP_RADIUS: f32 = 0.35;
@@ -35,6 +36,32 @@ const WINDOW_SIZE: (f32, f32, f32) = (1.0, 1.2, 0.9);
 
 /// Cap on retained undo snapshots. The scene is tiny, so this is generous.
 const HISTORY_CAP: usize = 200;
+
+
+/// The save format's version. Bump only when a change cannot be expressed as a new field
+/// with a `#[serde(default)]` — every field in the document has one, so an older save
+/// keeps loading and this number should move rarely.
+const SAVE_VERSION: u32 = 1;
+
+/// What a save file contains. `Scene` alone is not the document: the id allocators live
+/// on `Document` and reset to 1 on construction, so restoring only the scene would hand
+/// the next placement an id that already exists — silent wrong-object edits, the same
+/// shape as the resize and undo collisions. Monotonic has to survive the reload as well
+/// as the undo stack, or it isn't monotonic.
+#[derive(Serialize, Deserialize)]
+struct SaveFile {
+    version: u32,
+    scene: Scene,
+    next_ids: NextIds,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct NextIds {
+    wall: WallId,
+    opening: OpeningId,
+    furnishing: FurnishingId,
+}
 
 #[wasm_bindgen]
 pub struct Document {
@@ -95,12 +122,76 @@ impl Document {
     pub fn undo(&mut self) -> bool {
         match self.history.pop() {
             Some(scene) => {
-                self.scene = scene;
+                // History is deliberately left alone here — `pop` already took this
+                // step, and the rest of the stack is still good. See `replace_scene`.
+                self.replace_scene(scene);
                 self.rebuild();
                 true
             }
             None => false,
         }
+    }
+
+    /// The only way to swap the whole scene. Advances `revision` past the restored
+    /// value, so a rewind can never reproduce a number a watcher has already seen —
+    /// undo the last edit and the persistence layer must notice, or the undone edit
+    /// comes back on reload.
+    ///
+    /// **History is deliberately not this function's business.** Its two callers need
+    /// opposite things: `undo` has already popped one snapshot and must keep the rest,
+    /// while `load_json` must clear the stack entirely (a load is the only operation
+    /// that moves an allocator backwards, so a snapshot from before it would pair a
+    /// rewound scene with forward allocators). Clearing here would silently make undo
+    /// one step deep.
+    fn replace_scene(&mut self, scene: Scene) {
+        let next = self.scene.revision + 1;
+        self.scene = scene;
+        self.scene.revision = next;
+    }
+
+    // --- Persistence ---------------------------------------------------------
+
+    /// The whole document as JSON: scene plus the id allocators.
+    pub fn save_json(&self) -> String {
+        let file = SaveFile {
+            version: SAVE_VERSION,
+            scene: self.scene.clone(),
+            next_ids: NextIds {
+                wall: self.next_wall_id,
+                opening: self.next_opening_id,
+                furnishing: self.next_id,
+            },
+        };
+        // The document is plain data, so this cannot fail in practice; an empty string
+        // is a truthful "nothing to save" rather than a panic across the wasm boundary.
+        serde_json::to_string(&file).unwrap_or_default()
+    }
+
+    /// Replace the document from JSON. Returns `{ ok, kind, message }`.
+    ///
+    /// `kind` is a stable discriminator — `"ok"`, `"corrupt"`, `"version"` — because the
+    /// caller takes *different actions*, not merely shows different words: a corrupt
+    /// autosave slot should be cleared, while a save from a newer build must be kept
+    /// untouched or we destroy a room we merely cannot read yet. Matching on prose would
+    /// turn a reworded message into deleted user data.
+    ///
+    /// **A failed load changes nothing.** Everything is parsed and validated into a
+    /// fresh scene before anything is swapped in, so on failure the document is
+    /// bit-identical to before the call. A loader that half-clears the room on its way
+    /// to rejecting a file is worse than one that accepts garbage — it looks like it
+    /// worked.
+    pub fn load_json(&mut self, json: &str) -> JsValue {
+        match self.load_document(json) {
+            Ok(()) => outcome(true, "ok", ""),
+            Err(e) => outcome(false, e.kind(), e.message()),
+        }
+    }
+
+    /// Monotonic counter over every document mutation. Lets the persistence layer watch
+    /// one integer instead of instrumenting each mutation site — the one that gets
+    /// forgotten is the one that silently stops autosaving.
+    pub fn revision(&self) -> u32 {
+        self.scene.revision as u32
     }
 
     pub fn wall_count(&self) -> usize {
@@ -378,12 +469,14 @@ impl Document {
 
     // --- Furnishing catalog & selection -----------------------------------
 
-    /// Place a catalog asset in the room and select it. `ex/ey/ez` are the asset's
-    /// real-world extent (width/height/depth, metres). Returns the new furnishing id;
-    /// the web maps that id to the catalog entry (which GLB to load). Drops at the room
-    /// centre (origin if no room yet), then reseats so it snaps if the centre is near a
-    /// wall.
-    pub fn add_furnishing(&mut self, ex: f32, ey: f32, ez: f32) -> u32 {
+    /// Place a catalog asset in the room and select it. `asset_id` is the catalog entry
+    /// (e.g. `"couch-medium"`) and `ex/ey/ez` its real-world extent in metres. Returns the
+    /// new furnishing id. Drops at the room centre (origin if no room yet), then reseats
+    /// so it snaps if the centre is near a wall.
+    ///
+    /// The catalog id is stored on the document rather than kept in a JS map, so a saved
+    /// room knows *which* furniture it holds and not merely the size of the boxes.
+    pub fn add_furnishing(&mut self, asset_id: &str, ex: f32, ey: f32, ez: f32) -> u32 {
         self.checkpoint();
         let id = self.next_id;
         self.next_id += 1;
@@ -392,6 +485,7 @@ impl Document {
             id,
             asset: Asset {
                 extent: Vec3::new(ex, ey, ez),
+                asset_id: asset_id.to_string(),
             },
             placement: Placement {
                 position: Vec3::new(drop.x, 0.0, drop.y),
@@ -770,7 +864,10 @@ impl Document {
     }
 
     fn furnishing(&self, id: FurnishingId) -> Furnishing {
-        *self.scene.furnishing(id).expect("furnishing id exists")
+        self.scene
+            .furnishing(id)
+            .expect("furnishing id exists")
+            .clone()
     }
 
     /// Effective footprint the constraint solver sees once scale is applied.
@@ -778,6 +875,7 @@ impl Document {
         let f = self.furnishing(id);
         Asset {
             extent: f.asset.extent * f.scale,
+            asset_id: f.asset.asset_id.clone(),
         }
     }
 
@@ -842,7 +940,7 @@ mod tests {
 
     // A representative catalog extent (the sheen armchair), for tests that need one.
     fn chair(doc: &mut Document) -> u32 {
-        doc.add_furnishing(0.83, 0.69, 0.57)
+        doc.add_furnishing("sheen-chair", 0.83, 0.69, 0.57)
     }
 
     #[test]
@@ -1140,8 +1238,8 @@ mod tests {
     fn add_furnishing_hands_out_unique_ids_and_selects_the_new_one() {
         let mut doc = Document::new();
         doc.set_rectangle(4.0, 3.0);
-        let a = doc.add_furnishing(0.8, 0.7, 0.6);
-        let b = doc.add_furnishing(1.0, 0.5, 1.0);
+        let a = doc.add_furnishing("night-stand", 0.8, 0.7, 0.6);
+        let b = doc.add_furnishing("floor-lamp", 1.0, 0.5, 1.0);
         assert_ne!(a, b);
         assert_eq!(doc.furnishing_ids(), vec![a, b]);
         assert_eq!(doc.selected_id(), b as i32);
@@ -1350,4 +1448,222 @@ mod tests {
         assert!(doc.undo());
         assert_eq!(doc.crowded_ids(), vec![first, second]);
     }
+
+    // --- Persistence ---------------------------------------------------------
+
+    /// A room with something of everything in it, so a round trip has to carry all of it.
+    fn furnished_room() -> Document {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_wall(0.0, 3.0, 4.0, 3.0);
+        doc.add_opening(0, 0, 2.0, 0.0);
+        chair(&mut doc);
+        doc.add_furnishing("couch-medium", 1.964, 0.8, 0.923);
+        doc.set_floor_material(2);
+        doc.set_wall_material(3);
+        doc.set_lighting(2);
+        doc
+    }
+
+    #[test]
+    fn a_round_trip_is_byte_identical() {
+        let doc = furnished_room();
+        let first = doc.save_json();
+
+        let mut restored = Document::new();
+        restored.load_document(&first).expect("valid save loads");
+        // Not "it loaded without erroring" — the same bytes back out is the only check
+        // that catches a field quietly dropped on the way through.
+        assert_eq!(restored.save_json(), first);
+    }
+
+    #[test]
+    fn a_round_trip_keeps_every_id_keyed_answer() {
+        let doc = furnished_room();
+        let mut restored = Document::new();
+        restored.load_document(&doc.save_json()).unwrap();
+
+        assert_eq!(restored.wall_count(), doc.wall_count());
+        assert_eq!(restored.furnishing_ids(), doc.furnishing_ids());
+        assert_eq!(restored.opening_ids(), doc.opening_ids());
+        assert_eq!(restored.floor_material(), doc.floor_material());
+        assert_eq!(restored.wall_material(), doc.wall_material());
+        assert_eq!(restored.lighting(), doc.lighting());
+    }
+
+    #[test]
+    fn a_restored_room_still_knows_which_furniture_it_holds() {
+        let doc = furnished_room();
+        let mut restored = Document::new();
+        restored.load_document(&doc.save_json()).unwrap();
+
+        // The whole reason `Asset` carries a catalog id: without it a reload gives back
+        // correctly-sized invisible boxes and nothing errors.
+        let ids: Vec<String> = restored
+            .scene
+            .furnishings
+            .iter()
+            .map(|f| f.asset.asset_id.clone())
+            .collect();
+        assert_eq!(ids, vec!["sheen-chair".to_string(), "couch-medium".to_string()]);
+    }
+
+    #[test]
+    fn the_allocators_survive_so_a_reloaded_room_cannot_reissue_a_live_id() {
+        let doc = furnished_room();
+        let existing = doc.wall_ids();
+        let mut restored = Document::new();
+        restored.load_document(&doc.save_json()).unwrap();
+
+        // Restoring only the scene would reset the counter to 1 and hand the next wall
+        // an id that already exists — silent wrong-wall edits, the reload flavour of the
+        // resize collision.
+        restored.add_wall(1.0, 1.0, 2.0, 1.0);
+        let after = restored.wall_ids();
+        let fresh = after.last().copied().expect("a wall was added");
+        assert!(
+            !existing.contains(&fresh),
+            "reissued a live wall id {fresh}; had {existing:?}"
+        );
+    }
+
+    #[test]
+    fn a_newer_version_is_refused_and_the_refusal_changes_nothing() {
+        let mut doc = furnished_room();
+        let before = doc.save_json();
+
+        let from_the_future = before.replacen("\"version\":1", "\"version\":99", 1);
+        assert_eq!(doc.load_document(&from_the_future), Err(LoadError::Version));
+
+        // Refusing is only safe if the refusal is also a no-op. A loader that half-clears
+        // the room on its way to rejecting a file looks like it worked, which is worse
+        // than accepting garbage.
+        assert_eq!(doc.save_json(), before);
+    }
+
+    #[test]
+    fn a_corrupt_save_is_refused_and_the_refusal_changes_nothing() {
+        let mut doc = furnished_room();
+        let before = doc.save_json();
+
+        assert_eq!(doc.load_document("not json at all"), Err(LoadError::Corrupt));
+        assert_eq!(doc.load_document("{\"version\":1}"), Err(LoadError::Corrupt));
+        assert_eq!(doc.save_json(), before);
+    }
+
+    #[test]
+    fn loading_clears_the_undo_stack() {
+        let saved = furnished_room().save_json();
+        let mut doc = Document::new();
+        doc.set_rectangle(6.0, 5.0);
+        chair(&mut doc);
+        assert!(doc.history.len() > 1, "there is something to undo");
+
+        doc.load_document(&saved).unwrap();
+        // A load is the only operation that moves an allocator backwards, so a snapshot
+        // from before it would pair a rewound scene with forward allocators.
+        assert!(!doc.undo(), "undo must not reach across a load");
+    }
+
+    #[test]
+    fn undo_advances_the_revision_rather_than_rewinding_it() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let before = doc.revision();
+        chair(&mut doc);
+        let after_edit = doc.revision();
+        assert!(after_edit > before);
+
+        assert!(doc.undo());
+        // Rewinding the counter with the scene would let a later edit reproduce a number
+        // the autosave had already seen — the write is skipped and the undone edit comes
+        // back on reload.
+        assert!(
+            doc.revision() > after_edit,
+            "undo left revision at {} (was {after_edit}); an autosave watching it would skip the write",
+            doc.revision()
+        );
+    }
+
+    #[test]
+    fn loading_advances_the_revision_past_whatever_the_file_carried() {
+        let saved = furnished_room().save_json();
+        let mut doc = Document::new();
+        for _ in 0..50 {
+            chair(&mut doc);
+        }
+        let before = doc.revision();
+
+        doc.load_document(&saved).unwrap();
+        assert!(
+            doc.revision() > before,
+            "a load must advance the counter, not inherit the file's"
+        );
+    }
+}
+
+/// Why a load was refused. Kept separate from the `JsValue` boundary so the logic is
+/// reachable from `cargo test` — a `JsValue` cannot be built off-wasm, and an untestable
+/// loader is the last thing this format needs.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LoadError {
+    /// Not JSON, or not this shape.
+    Corrupt,
+    /// Written by a build newer than this one.
+    Version,
+}
+
+impl LoadError {
+    /// Stable discriminator. The caller branches on this to decide whether to *delete*
+    /// a save slot, so it must never be derived from the prose: a corrupt slot should be
+    /// cleared, while a newer-version save must be kept untouched.
+    fn kind(&self) -> &'static str {
+        match self {
+            LoadError::Corrupt => "corrupt",
+            LoadError::Version => "version",
+        }
+    }
+
+    fn message(&self) -> &'static str {
+        match self {
+            LoadError::Corrupt => "This file isn't a Spacelab room.",
+            LoadError::Version => "This room was saved by a newer version of Spacelab.",
+        }
+    }
+}
+
+impl Document {
+    /// Parse, validate, then swap — in that order, so a refused load changes nothing.
+    /// Mutating while parsing would leave a half-populated document on failure, which
+    /// looks like it worked and is worse than refusing outright.
+    pub fn load_document(&mut self, json: &str) -> Result<(), LoadError> {
+        let file: SaveFile = serde_json::from_str(json).map_err(|_| LoadError::Corrupt)?;
+        if file.version > SAVE_VERSION {
+            return Err(LoadError::Version);
+        }
+
+        // Nothing below can fail, so the document is safe to touch from here.
+        self.replace_scene(file.scene);
+        self.next_wall_id = file.next_ids.wall;
+        self.next_opening_id = file.next_ids.opening;
+        self.next_id = file.next_ids.furnishing;
+        // A load is the only operation that moves an allocator *backwards*, so a snapshot
+        // taken before it would pair a rewound scene with forward allocators — undo into
+        // that and the next id collides with a live one. Clean break instead.
+        self.history.clear();
+        self.selected = None;
+        self.selected_opening = None;
+        self.rebuild();
+        Ok(())
+    }
+}
+
+/// `{ ok, kind, message }` for the JS side. Hand-built rather than `serde_wasm_bindgen`
+/// so this stays one dependency lighter.
+fn outcome(ok: bool, kind: &str, message: &str) -> JsValue {
+    let object = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&object, &"ok".into(), &JsValue::from_bool(ok));
+    let _ = js_sys::Reflect::set(&object, &"kind".into(), &JsValue::from_str(kind));
+    let _ = js_sys::Reflect::set(&object, &"message".into(), &JsValue::from_str(message));
+    object.into()
 }

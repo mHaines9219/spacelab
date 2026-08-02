@@ -39,6 +39,68 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### M5: the save format — document to JSON and back · 2026-08-02
+
+**Accomplished**
+
+- **`save_json()` / `load_json()` on `Document`**, with a versioned envelope. `serde` +
+  `serde_json`, every document type derived with `#[serde(default)]` so a field added
+  later never invalidates an existing save.
+- **The envelope carries the id allocators, because `Scene` is not the whole document.**
+  `next_wall_id` / `next_opening_id` / `next_id` live on `Document` and reset to 1 on
+  construction, so restoring only the scene would hand the next placement an id that
+  already exists — silent wrong-object edits, the reload flavour of the resize collision.
+  Recomputing them as `max(id) + 1` is the same trap one level down: delete the highest
+  item, reload, and the next allocation reuses a freed id. **Monotonic has to survive the
+  reload *and* the undo stack, or it isn't monotonic.**
+- **`Asset` now carries the catalog id, and this was a Rule #1 gap rather than a format
+  wrinkle.** `Asset` was `{ extent: Vec3 }`; which catalog entry a furnishing *was* lived
+  only in a JavaScript `Map` that dies with the page. A saved room would have restored as
+  correctly-sized invisible boxes with nothing erroring. `Asset` and `Furnishing` lose
+  `Copy` for it — six call sites, paid before the format froze rather than after.
+- **`revision` on `Scene`, bumped in `apply`** — the funnel that already promises to see
+  every mutation — so the persistence layer watches one integer instead of 31 call sites.
+  **`replace_scene` is the only way to swap a scene** and always advances the counter past
+  the restored value; `undo` assigns wholesale and would otherwise be invisible to a
+  watcher, so an undone edit would come back on reload. History policy is deliberately
+  *not* in that funnel: `undo` must keep the rest of the stack and `load` must clear it,
+  so putting `history.clear()` there would silently make undo one step deep.
+- **`revision` is not persisted.** The byte-identity test caught this: the same room saved
+  after three edits and after three hundred produced different files. It is session-local
+  change detection, not part of the room, and on load the counter advances from the current
+  session's value anyway — so the file's would never be read.
+- **A refused load changes nothing.** Parse and validate into a fresh scene, swap only on
+  success. A loader that half-clears the room on its way to rejecting a file looks like it
+  worked, which is worse than accepting garbage.
+- **`load_json` returns `{ ok, kind, message }` with a stable `kind`.** The caller branches
+  on it to decide whether to *delete* a save slot — a corrupt slot should be cleared, a
+  newer-version save must be kept untouched — and that decision must never be made by
+  string-matching prose that someone may reword.
+- Verified: **112 Rust tests, clippy clean** (was 103). WASM **54,804 → 103,872 B gzipped**
+  (`gzip -n -9`), **+49.1 KB, 42% of the 250 KB budget** against 22% before. In line with
+  the 44.7 KB Fizz measured in his spike; the extra is the envelope and the outcome object.
+- **Checked the tests bite rather than pass**, by mutating the source: `replace_scene`
+  inheriting the revision → 2 failures; validating the version *after* mutating → 1;
+  not restoring the allocators → 2. Each caught by the test written for it, none passing
+  vacuously.
+
+**Remains**
+
+- **Nothing calls this yet.** The web half — autosave, boot restore, import/export — is
+  Honey's and lands separately. Until it does, the format is exercised only by its tests.
+- **`add_furnishing` changed signature** to take the catalog id first. `viewport.ts` must
+  pass `entry.asset_id`; that wiring is in the web half.
+- **f32 in JSON is noisy** (`0.30000001192092896`). Accepted deliberately: exact
+  round-tripping matters more than pretty output, and rounding on write would make
+  save→load→save unstable — the very property the first test asserts.
+- **No migration path exists yet**, only a version *check*. v1 refuses a v2 file; nothing
+  upgrades one. That is correct for MVP and will need writing the first time the number
+  moves.
+- **The save is not compressed and has no size ceiling.** One room is tens of KB, but a
+  `localStorage` quota failure is the web half's problem to report and nothing here caps it.
+- Carried: `cargo fmt` still ungated and the tree still not `rustfmt`-clean; the browser
+  job is ~8 minutes on CI against ~27 seconds locally; concurrent local suite runs still
+  contend; a real-LiDAR RoomPlan round-trip is still owed.
 ### A stale WASM binding now fails with an instruction · 2026-08-02
 
 **Accomplished**

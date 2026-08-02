@@ -314,9 +314,12 @@ mod tests {
     use super::*;
     use core_scene::{Command, OpeningKind, WallId, WallOrigin};
 
-    const CHAIR: Asset = Asset {
-        extent: Vec3::new(0.83, 0.69, 0.57),
-    };
+    fn chair_asset() -> Asset {
+        Asset {
+            extent: Vec3::new(0.83, 0.69, 0.57),
+            asset_id: "sheen-chair".into(),
+        }
+    }
 
     fn corner_room() -> Scene {
         let mut scene = Scene::default();
@@ -815,7 +818,7 @@ mod tests {
 
     #[test]
     fn open_floor_placement_follows_the_cursor() {
-        let placement = resolve_placement(&corner_room(), &CHAIR, Vec2::new(2.1, 1.7), 0.35);
+        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 1.7), 0.35);
         assert_eq!(placement.anchor, Anchor::Floor);
         assert_eq!(placement.position, Vec3::new(2.1, 0.0, 1.7));
         assert_eq!(placement.yaw, 0.0);
@@ -823,7 +826,7 @@ mod tests {
 
     #[test]
     fn nearby_wall_seats_the_back_face_against_it() {
-        let placement = resolve_placement(&corner_room(), &CHAIR, Vec2::new(2.1, 0.4), 0.35);
+        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 0.4), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(0));
         // 0.06 wall half-thickness + 0.285 chair half-depth
         assert!((placement.position.z - 0.345).abs() < 1e-5);
@@ -840,7 +843,7 @@ mod tests {
             Vec2::new(0.3, 3.2),
         ] {
             assert_eq!(
-                resolve_placement(&corner_room(), &CHAIR, cursor, 0.35)
+                resolve_placement(&corner_room(), &chair_asset(), cursor, 0.35)
                     .position
                     .y,
                 0.0
@@ -850,7 +853,7 @@ mod tests {
 
     #[test]
     fn perpendicular_wall_yaws_the_asset_to_match() {
-        let placement = resolve_placement(&corner_room(), &CHAIR, Vec2::new(0.3, 1.7), 0.35);
+        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(0.3, 1.7), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(1));
         assert!((placement.position.x - 0.345).abs() < 1e-5);
         assert!((placement.yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
@@ -858,20 +861,20 @@ mod tests {
 
     #[test]
     fn placement_slides_along_the_wall_instead_of_overhanging_it() {
-        let placement = resolve_placement(&corner_room(), &CHAIR, Vec2::new(4.6, 0.3), 0.35);
+        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(4.6, 0.3), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(0));
         assert!((placement.position.x - (4.2 - 0.415)).abs() < 1e-5);
     }
 
     #[test]
     fn overlapping_the_wall_pushes_the_asset_back_out() {
-        let placement = resolve_placement(&corner_room(), &CHAIR, Vec2::new(2.1, 0.02), 0.35);
+        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 0.02), 0.35);
         assert!((placement.position.z - 0.345).abs() < 1e-5);
     }
 
     #[test]
     fn the_nearest_wall_wins_in_a_corner() {
-        let placement = resolve_placement(&corner_room(), &CHAIR, Vec2::new(0.25, 0.4), 0.35);
+        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(0.25, 0.4), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(1));
     }
 
@@ -886,7 +889,7 @@ mod tests {
             height: 2.5,
             origin: WallOrigin::Drawn,
         }));
-        let placement = resolve_placement(&scene, &CHAIR, Vec2::new(0.35, 0.3), 0.35);
+        let placement = resolve_placement(&scene, &chair_asset(), Vec2::new(0.35, 0.3), 0.35);
         assert!((placement.position.x - 0.2).abs() < 1e-5);
     }
 }
