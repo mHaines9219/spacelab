@@ -1,8 +1,10 @@
 //! Turns the scene document into meshes: prismatic wall extrusion, triangulation, snapping and clearance queries.
 
 mod junction;
+mod room;
 
 pub use junction::{WallEnds, mitre_walls};
+pub use room::{Room, rooms};
 
 use core_scene::{Anchor, Asset, Opening, Placement, Scene, Wall};
 use glam::{Vec2, Vec3};
@@ -199,7 +201,7 @@ pub fn floor_mesh(scene: &Scene, out: &mut MeshBuffers) {
 }
 
 /// Twice the signed area of a polygon; positive when the winding is counter-clockwise.
-fn signed_area2(poly: &[Vec2]) -> f32 {
+pub(crate) fn signed_area2(poly: &[Vec2]) -> f32 {
     let n = poly.len();
     (0..n)
         .map(|i| {

@@ -39,6 +39,63 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### M1: room detection from the wall graph · 2026-08-01
+
+**Accomplished**
+
+- **The walls are read as a graph, and its bounded faces are the rooms.** A wall list is not
+  a room — the rooms are the areas you could not walk out of. New
+  `crates/core-geometry/src/room.rs` does the standard planar-graph face walk: build
+  half-edges (every wall in both directions), sort the ones leaving each corner by angle,
+  then always take the sharpest right turn. That partitions the half-edges into closed
+  loops, one per face, and the unbounded outside is the single loop that comes back
+  clockwise. `rooms(&scene) -> Vec<Room>` returns each enclosed area's centreline outline,
+  the walls bounding it, and its `area()`, largest first. Multi-room and branching layouts
+  fall out of it: a partition across a room yields two rooms, and a spur hanging inside one
+  yields none extra.
+- **A wall ending part-way along another still closes a room against it.** Nobody draws an
+  alcove by first cutting the wall it hangs off in two, so each wall becomes one graph edge
+  per stretch between the corners that land on it, not one edge end-to-end. Without that
+  split the long wall closes nothing and the alcove is invisible.
+- **Detection is not the floor, and deliberately does not touch it.** `Scene.floor_outline`
+  is the document's own footprint and stays put when a wall is deleted — a decision this
+  plan already made and `deleting_walls_never_reshapes_the_floor` already guards. Room
+  detection answers a different question, so it is exposed alongside rather than wired into
+  `floor_mesh`. The binding names say so: `has_room`/`room_bounds` are the floor,
+  `detected_room_count`/`_outlines`/`_corner_counts`/`_areas` are what the walls enclose.
+- Verified: **75 tests green across the workspace + clippy clean** (11 solver tests in
+  `room.rs` — closed rectangle, partition splits one room into two, two rooms sharing a
+  doorway wall, an open side, a spur, a mid-span meeting, a bare crossing, a zero-length
+  wall, winding, and the empty scene — plus 3 binding tests). The load-bearing pair: the
+  default rectangle **has a floor but encloses no room** (two walls in an L), and adding the
+  two missing walls by hand makes it detectable at 12.00 m².
+
+**Remains**
+
+- **Nothing in the UI consumes this yet.** The binding is reachable and tested, but no panel
+  reads it, so a user sees no difference. The obvious first consumer is an area readout —
+  "1 room, 12.0 m²" — which is most of what detection is *for* and is a `web/` change.
+- **This is the biggest single WASM cost so far: +13.5 KB gzipped** (36,289 → 49,807 B for
+  the algorithm alone; the three outline/area accessors add a further 1,611 B, to
+  **51,418 B**). Still only 21% of the 250 KB budget, but it is an order of magnitude more
+  than any other feature here and worth knowing before the next graph algorithm lands.
+  Swapping the three `sort_by` calls to `sort_unstable_by` was measured and was slightly
+  *worse* (51,569 B), so the cost is the graph machinery, not the sort.
+- **Each of the three accessors re-solves the graph.** A caller reading all three — which is
+  exactly what an area readout would do — walks the graph three times. The scene is tiny so
+  this is invisible today; caching on `rebuild` is the fix when it stops being.
+- **Two walls that merely cross mid-span make no corner.** Only shared endpoints and
+  endpoints landing on another wall do. A room closed by walls that overlap rather than meet
+  is not detected. Proper segment intersection is the fix and is not written.
+- **M1 stays 🚧 for one reason:** resizing a room calls `set_rectangle`, which rebuilds the
+  wall list from scratch and **wipes any wall the user added by hand**. M1's named
+  deliverables are all present now, but that is data loss inside M1's own scope, so the
+  milestone should not read done until it is fixed. Next in this lane.
+- Carried: everything in the mitring entry below, unchanged — T-junctions square, the
+  shallow-corner fallback, sub-mitre stubs, coincident end caps, and openings at a mitred
+  end. Plus the staggered drop point (0.3 m a step against a 1.964 m couch, so every
+  placement and re-import overlaps), and no committed browser suite.
+
 ### M1: mitred wall junctions · 2026-08-01
 
 **Accomplished**
