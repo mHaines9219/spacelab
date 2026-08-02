@@ -26,16 +26,17 @@
 
 Updated at the end of every PR — see [Keeping this section current](#keeping-this-section-current). Newest entry first.
 
-**Now: M1 — Floorplan & shell.** MVP is M0–M4.
+**Now: M1 — Floorplan & shell.** MVP is **M0–M3 + M5** — [amended 2026-08-01](#milestones)
+on the owner's ruling; M4 moves after MVP and persistence moves into it.
 
 | Milestone | State |
 |---|---|
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
-| M3 — Look | ⬜ |
-| M4 — Capture companion (iOS) | ⬜ |
-| M5 — Persistence & sharing | ⬜ |
+| M3 — Look | ⬜ (renderer basics landed early, during M1) |
+| M5 — Persistence & sharing | ⬜ **in MVP** |
+| M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
 ### M1: mitred wall junctions · 2026-08-01
@@ -65,7 +66,12 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 - Verified: **61 tests green across the workspace + clippy clean** (8 new solver tests in
   `junction.rs`, 7 new mesh-level tests in `lib.rs` covering the room envelope, unequal
   thicknesses, unchanged quad counts, face extents, end-cap winding, and a degenerate stub).
-  WASM **35.6 KB gzipped** (was 35.5; budget 250). Also driven in the real app and compared
+  WASM **36,289 B gzipped, up 958 B** from `main`'s 35,331 B — measured `gzip -n -9` on
+  `wasm_bindings_bg.wasm` after a fresh `npm run wasm`, against a 250 KB budget. (Earlier
+  revisions of this entry said "35.6 KB, was 35.5", which understated the cost tenfold: it
+  mixed a KB reading of one build with a KiB reading of the other. Quote raw bytes and the
+  exact gzip flags — the `-n` alone is worth ~22 B and `-9` about 50 B, which is enough for
+  two honest measurements to disagree.) Also driven in the real app and compared
   side by side against `main` at identical camera framing: on `main` the outer corner of the
   default two-wall room shows a stepped notch where one wall's end cap juts past the other's
   face; on this branch the two outer faces meet in a single edge. `tsc` clean, no console
@@ -101,7 +107,13 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
   needs `wall_mesh` to know which of its ends were mitred, which `WallEnds` does not say.
 - **Room detection from the wall graph is still open** — the other half of M1, and the thing
   multi-room and branching layouts need. Next in this lane, then the `set_rectangle` rebuild
-  that wipes hand-added walls.
+  that wipes hand-added walls, then the staggered drop point (0.3 m a step against a 1.964 m
+  couch, so every successive placement and every bullpen re-import lands overlapping — a
+  pre-existing placement bug that clearance warnings merely made visible). Ordering note:
+  `RESEARCH/ROOMPLAN_SCHEMA_FIT.md` finds that RoomPlan ships **no floor polygon**, so a
+  future importer has to derive `floor_outline` by walking the wall loop — the same loop walk
+  room detection is. **The importer is downstream of this item, not parallel to it**, or the
+  walk gets written twice.
 - Carried: a rotated item dragged against a wall keeps the user's yaw rather than re-facing
   flush, so the offset is computed from its back face; clearance/collision between furnishings
   is still the headline M2 gap (being taken up now as hand-rolled 2D SAT on oriented
@@ -494,18 +506,21 @@ Throwaway code proving the whole seam: Rust→WASM emits wall geometry for two h
 
 **M6+ — Expansion.** Android capture (ARCore + corner-tap), native desktop shell (`wgpu`), cloud final-render, AI assist, collaboration, brand catalog.
 
-**MVP = M0–M4.** M5 is close behind and arguably part of it, since a design nobody can share is a design nobody talks about.
+**MVP = M0–M3 + M5.** Amended 2026-08-01 (was M0–M4) on the project owner's ruling —
+verbatim, 2026-08-02T00:31:55Z: *"yes skip to M5, lidar, and apple account are not set up,
+but saving and loading are MVP."* **M4 moves after MVP and save/load is in it.** Two
+reasons stand behind the call. First,
+**nothing persists** — there is no serialization anywhere in the tree, so a reload eats the
+room, the walls and the bullpen, which makes the [Verification](#verification) thesis test
+(hand the build to someone who has never used Blender and watch them lay out their bedroom)
+much weaker than it should be. Second, **M4 is hardware-blocked** without a device or an
+account, and account provisioning has lead time the [risk table](#risks) says to start
+during M3 regardless.
 
-> **Open question (raised 2026-08-01, not yet decided):** should MVP be **M0–M3 + M5** instead,
-> moving M4 after it? Two arguments for, both recorded here rather than acted on because the
-> call is the project owner's. First, **nothing persists** — there is no serialization anywhere
-> in the tree, so a reload eats the room, the walls and the bullpen, which makes the
-> [Verification](#verification) thesis test (hand the build to someone who has never used
-> Blender) much weaker than it should be. Second, **M4 may be hardware-blocked**: it needs a
-> LiDAR iPhone and an Apple developer account, and whether those are available is unconfirmed.
-> Note the RoomPlan *schema* round-trip is not hardware-blocked either way — a synthetic export
-> against Apple's published `CapturedRoom` shape answers the structural question without a
-> device, and that is in progress independently of this question.
+The RoomPlan *schema* round-trip is not hardware-blocked and does not move: a synthetic
+export against Apple's published `CapturedRoom` shape answers the structural question
+without a device. It leaves the MVP path but stays owed — see
+[Verification](#verification).
 
 ## Deliberately deferred
 
