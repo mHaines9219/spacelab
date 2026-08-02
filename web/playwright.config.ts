@@ -37,11 +37,20 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `npm run dev -- --port ${PORT} --strictPort`,
+    // `vite`, deliberately not `npm run dev`. `dev` is `npm run wasm && vite`, which put a
+    // release-mode wasm-pack build of the whole workspace inside this timeout — so on a
+    // loaded machine the build alone blew the budget and the run died with
+    // "Timed out waiting from config.webServer", which reads like a hang rather than
+    // "your compile is slow". The WASM build now happens in `test:e2e`, ahead of
+    // Playwright, where a slow or failing build surfaces as a build error with compiler
+    // output. Run `npx playwright test` directly and you get whatever WASM is already in
+    // `src/wasm/`; `npm run test:e2e` is the entrypoint that guarantees freshness.
+    command: `vite --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
-    // A cold run builds the WASM from scratch, which outlasts vite's own startup.
-    timeout: 240_000,
+    // Vite alone boots in about a second. This is generous for a loaded machine while
+    // still being short enough that a genuine hang surfaces in two minutes, not four.
+    timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",
   },

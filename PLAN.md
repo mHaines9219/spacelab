@@ -44,7 +44,7 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 **Accomplished**
 
 - **The browser suite exists in the tree now.** `web/tests/`, run with `npm run test:e2e`.
-  Seventeen tests over `@playwright/test`: room creation and the floor's independence from
+  Eighteen tests over `@playwright/test`: room creation and the floor's independence from
   the walls, catalog placement, set-aside/re-import, rotation, doors and windows cutting a
   wall, floor and wall finishes, and the clearance outlines. Every dev probe in
   `viewport.ts` — `__crowdedIds`, `__outlines`, `__wallTris`, `__openingCount` and the rest
@@ -62,6 +62,14 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
   which is the exact damage that got past three reviewers. Both checks were validated
   against the real damage: the disappearance check fires on `b1c7067` against `861d0dc`,
   and the shared-body check fires on the first restoration attempt.
+- **The WASM build no longer sits inside the server-startup timeout.** `webServer` ran
+  `npm run dev`, which is `npm run wasm && vite` — so a release-mode wasm-pack build of
+  the whole workspace was being measured against a budget meant for booting a dev server.
+  On a loaded machine the build alone blew it, and the run died with
+  `Timed out waiting 240000ms from config.webServer`, which reads like a hang rather than
+  a slow compile. `webServer` now runs bare `vite` and `test:e2e` builds the WASM ahead of
+  Playwright, where a slow or failing build surfaces as a build error with compiler
+  output. CI already split these, so only the local path was affected.
 - **The suite found a bug on its first full run.** Deleting a wall leaves its door
   floating in mid-air — Rust drops the opening from the document, but
   `deleteSelectedWall` (`viewport.ts:709`) calls `syncRoomGeometry()` and
@@ -85,8 +93,13 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
   sequenced after they merge: own commit, then the gate.
 - **The browser job takes ~8 minutes on CI against ~27 seconds locally.** Headless
   Chromium has no GPU, so every frame goes through software GL (swiftshader). Workable at
-  17 tests; it will not stay workable indefinitely, and sharding or trimming the WASM
-  rebuild is the lever when it stops being.
+  18 tests; it will not stay workable indefinitely, and sharding is the lever when it
+  stops being.
+- **Concurrent suite runs on one machine still degrade badly**, even with the WASM build
+  moved out of the server timeout. Three agents running browser suites at load average
+  8.5 produced a 1.5-hour run with nine `webServer` timeouts and no assertion failures at
+  all. The build/boot split below removes the worst of it, but a shared machine remains a
+  hazard and the symptom still reads as a hang rather than as contention.
 - The suite is **one browser, one room shape**, and it does not drive the Draw flow, the
   3D pointer-drag path, or camera framing. Wall ids `0`/`1` are assumed from
   `build_room`'s index assignment, which the resize fix is about to change — those tests

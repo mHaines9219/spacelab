@@ -33,6 +33,26 @@ test.describe("furnishing", () => {
     await expect.poll(() => probe(page, "__furnishingCount")).toBe(1);
   });
 
+  test("an id is never reused after an undo", async ({ page }) => {
+    await openRectangleRoom(page);
+    await placeFromCatalog(page, NIGHT_STAND);
+    const [first] = await probe(page, "__outlines");
+
+    await undo(page);
+    await expect.poll(() => probe(page, "__furnishingCount")).toBe(0);
+
+    await placeFromCatalog(page, NIGHT_STAND);
+    const [second] = await probe(page, "__outlines");
+
+    // The id allocator lives on `Document`, outside the `Scene` that `checkpoint()`
+    // clones, so undo rewinds the document but not the counter. That separation is
+    // load-bearing and easy to undo by accident: move `next_id` onto `Scene` and this
+    // pair collides, which matters because `viewport.ts` keys its furnishing and catalog
+    // maps on the id and those maps outlive an undo — a reused id would silently resolve
+    // a new object through the old entry, wrong asset and all.
+    expect(second.id).not.toBe(first.id);
+  });
+
   test("an arrow key rotates the selection", async ({ page }) => {
     await openRectangleRoom(page);
     await placeFromCatalog(page, NIGHT_STAND);
