@@ -42,6 +42,64 @@ export async function undo(page: Page) {
   await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
 }
 
+/** The HUD's "enclosed" row — what the walls enclose, as the user reads it. */
+export async function enclosedReadout(page: Page) {
+  const row = page.locator(".hud .row", { hasText: "enclosed" });
+  await row.waitFor({ state: "visible" });
+  return ((await row.textContent()) ?? "").replace(/^enclosed/, "").trim();
+}
+
+/**
+ * Trace a closed room through the Draw editor. Corners are clicked as fractions of the
+ * SVG so the viewport size stays a config detail; the editor snaps each to a 6-inch grid
+ * and "close room" shuts the loop, so the polygon is deterministic without typing exact
+ * distances.
+ *
+ * A traced room raises *every* wall it drew, unlike the generated rectangle's two — which
+ * is why this is the only flow that produces an enclosed area to read.
+ */
+export async function traceClosedRoom(page: Page) {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Draw/ }).click();
+  const svg = await page.locator("svg.draw-canvas").boundingBox();
+  if (!svg) throw new Error("draw canvas has no bounding box");
+  // One `<circle>` is rendered per placed corner, so wait on that rather than a sleep.
+  // Clicking without waiting races React's state: several handlers close over the same
+  // stale `points`, and you end up with a degenerate polygon that still has four walls
+  // but encloses nothing — which is a passing wall count over a broken room.
+  const corners = page.locator("svg.draw-canvas circle");
+  const at: [number, number][] = [
+    [0.32, 0.32],
+    [0.68, 0.32],
+    [0.68, 0.66],
+    [0.32, 0.66],
+  ];
+  for (const [i, [fx, fy]] of at.entries()) {
+    await page.mouse.click(svg.x + svg.width * fx, svg.y + svg.height * fy);
+    await expect.poll(() => corners.count()).toBe(i + 1);
+  }
+  await page.getByRole("button", { name: "close room" }).click();
+  await expect.poll(() => probe(page, "__wallCount")).toBe(4);
+}
+
+/**
+ * Delete a wall without assuming its id. Wall ids are monotonic and never reused, so a
+ * second room's walls do NOT start at 0 — a hardcoded 0 is a silent no-op there, which is
+ * exactly the trap this helper exists to stop a test falling into.
+ */
+export async function deleteAnyWall(page: Page) {
+  const before = await probe(page, "__wallCount");
+  const id = await page.evaluate((n) => {
+    for (let candidate = 0; candidate < 64; candidate++) {
+      (window as never as { __deleteWallById: (i: number) => void }).__deleteWallById(candidate);
+      if ((window as never as { __wallCount: () => number }).__wallCount() < n) return candidate;
+    }
+    return null;
+  }, before);
+  expect(id, "no wall id removed a wall").not.toBeNull();
+  await expect.poll(() => probe(page, "__wallCount")).toBe(before - 1);
+}
+
 /**
  * Add a wall by hand through the real add-wall flow: arm the mode, then two floor
  * clicks. There is deliberately no probe for this — the whole point of the wall it

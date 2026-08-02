@@ -1,5 +1,13 @@
 import { test, expect, probe } from "./fixtures";
-import { addWallByHand, openRectangleRoom, resizeWidthFeet, undo } from "./app";
+import {
+  addWallByHand,
+  deleteAnyWall,
+  enclosedReadout,
+  openRectangleRoom,
+  resizeWidthFeet,
+  traceClosedRoom,
+  undo,
+} from "./app";
 
 test.describe("floorplan shell", () => {
   test("a generated rectangle opens on two walls over a full floor", async ({ page }) => {
@@ -72,5 +80,46 @@ test.describe("floorplan shell", () => {
       await resizeWidthFeet(page, feet);
       await expect.poll(() => probe(page, "__wallCount")).toBe(3);
     }
+  });
+});
+
+/**
+ * The readout for what the walls *enclose*, which is deliberately not the floor. Room
+ * detection has been on the binding since it landed and nothing on screen used it, so
+ * these assert the distinction a user can now actually see.
+ *
+ * The area arithmetic itself is covered by Rust unit tests on `rooms()`. What these own
+ * is that the readout tracks the wall graph — including going back to "nothing enclosed"
+ * when the loop breaks, which is the case that makes the distinction worth showing.
+ */
+test.describe("enclosed-area readout", () => {
+  test("the default room has a floor but encloses nothing", async ({ page }) => {
+    await openRectangleRoom(page);
+    // Two far walls over a full floor: a real floor, no enclosed space. Saying "0 sq ft"
+    // here would imply a closed room of no size, which is a different thing.
+    expect(await probe(page, "__floorTris")).toBeGreaterThan(0);
+    // Polled, not read once: the probes answer immediately but this row is React state
+    // refreshed on the next stats tick, so a single read can outrun the render.
+    await expect.poll(() => enclosedReadout(page)).toBe("open — nothing enclosed");
+  });
+
+  test("a traced room reports the area it encloses", async ({ page }) => {
+    await traceClosedRoom(page);
+    // Square feet, not m², because every other measurement in the UI is feet and inches.
+    await expect.poll(() => enclosedReadout(page)).toMatch(/^\d+ sq ft$/);
+    const readout = await enclosedReadout(page);
+    expect(Number(readout.replace(" sq ft", ""))).toBeGreaterThan(0);
+  });
+
+  test("breaking the loop drops back to nothing enclosed, floor untouched", async ({ page }) => {
+    await traceClosedRoom(page);
+    await expect.poll(() => enclosedReadout(page)).toMatch(/sq ft$/);
+    const floorBefore = await probe(page, "__floorTris");
+
+    await deleteAnyWall(page);
+
+    // The whole point of the readout: the floor is still there, the enclosure is not.
+    await expect.poll(() => enclosedReadout(page)).toBe("open — nothing enclosed");
+    expect(await probe(page, "__floorTris")).toBe(floorBefore);
   });
 });
