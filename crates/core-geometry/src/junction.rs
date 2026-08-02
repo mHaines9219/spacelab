@@ -153,8 +153,8 @@ pub fn mitre_walls(scene: &Scene) -> Vec<WallEnds> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_scene::WallOrigin;
     use core_scene::Command;
+    use core_scene::WallOrigin;
 
     fn wall(id: u32, start: Vec2, end: Vec2) -> Wall {
         Wall {
@@ -320,8 +320,14 @@ mod tests {
         }
         // And the ordering is the actual claim: sharper corners fail at longer walls.
         let at = |turn| middle_inner_span(0.24, turn);
-        assert!(at(45.0f32) > at(90.0), "a gentle kink must survive better than a right angle");
-        assert!(at(90.0f32) > at(141.0), "a right angle must survive better than an acute corner");
+        assert!(
+            at(45.0f32) > at(90.0),
+            "a gentle kink must survive better than a right angle"
+        );
+        assert!(
+            at(90.0f32) > at(141.0),
+            "a right angle must survive better than an acute corner"
+        );
     }
 
     #[test]
@@ -347,4 +353,3 @@ mod tests {
         );
     }
 }
-

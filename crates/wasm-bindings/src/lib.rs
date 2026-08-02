@@ -37,7 +37,6 @@ const WINDOW_SIZE: (f32, f32, f32) = (1.0, 1.2, 0.9);
 /// Cap on retained undo snapshots. The scene is tiny, so this is generous.
 const HISTORY_CAP: usize = 200;
 
-
 /// The save format's version. Bump only when a change cannot be expressed as a new field
 /// with a `#[serde(default)]` — every field in the document has one, so an older save
 /// keeps loading and this number should move rarely.
@@ -223,7 +222,10 @@ impl Document {
     /// Replace the room with an arbitrary closed loop. `coords` is `[x0, z0, x1, z1, …]`
     /// in metres, in draw order; the loop is closed automatically.
     pub fn set_polygon(&mut self, coords: &[f32]) {
-        let points: Vec<Vec2> = coords.chunks_exact(2).map(|c| Vec2::new(c[0], c[1])).collect();
+        let points: Vec<Vec2> = coords
+            .chunks_exact(2)
+            .map(|c| Vec2::new(c[0], c[1]))
+            .collect();
         if points.len() >= 3 {
             self.checkpoint();
             // A traced room raises every wall the user drew — the two-wall default is
@@ -1001,13 +1003,21 @@ mod tests {
 
         doc.set_floor_material(2);
         assert_eq!(doc.set_wall_material(3), 3);
-        assert_eq!(doc.floor_material(), 2, "wall finish must not move the floor");
+        assert_eq!(
+            doc.floor_material(),
+            2,
+            "wall finish must not move the floor"
+        );
 
         // Undo the wall finish only: walls revert, the floor keeps its choice.
         assert!(doc.undo());
         assert_eq!(doc.wall_material(), 0);
         assert_eq!(doc.floor_material(), 2);
-        assert_eq!(doc.wall_count(), 2, "the room is untouched by a finish change");
+        assert_eq!(
+            doc.wall_count(),
+            2,
+            "the room is untouched by a finish change"
+        );
     }
 
     /// Out-of-range ordinals clamp to the last variant rather than panicking, matching
@@ -1100,7 +1110,11 @@ mod tests {
         doc.set_rectangle(5.0, 3.0);
 
         // Losing the door while keeping its wall would be a worse bug than the original.
-        assert_eq!(doc.opening_ids().len(), 1, "the surviving wall lost its door");
+        assert_eq!(
+            doc.opening_ids().len(),
+            1,
+            "the surviving wall lost its door"
+        );
     }
 
     #[test]
@@ -1237,7 +1251,10 @@ mod tests {
         let id = chair(&mut doc);
         doc.rotate(3.0);
         let yaw = doc.furnishing_transform(id)[3];
-        assert!(yaw.abs() > 0.0, "rotate should give the chair a non-zero yaw");
+        assert!(
+            yaw.abs() > 0.0,
+            "rotate should give the chair a non-zero yaw"
+        );
         // Grab and move it out in open floor: the position changes but the yaw the
         // user rotated to must survive, rather than snapping back to the default.
         doc.checkpoint();
@@ -1285,7 +1302,10 @@ mod tests {
         assert_eq!(doc.furnishing_ids(), vec![id]);
         assert!(doc.stashed_ids().is_empty());
         assert_eq!(doc.selected_id(), id as i32);
-        assert!((doc.dimensions()[0] - width_before).abs() < 1e-3, "width should survive");
+        assert!(
+            (doc.dimensions()[0] - width_before).abs() < 1e-3,
+            "width should survive"
+        );
     }
 
     #[test]
@@ -1385,10 +1405,17 @@ mod tests {
         doc.add_opening(0, 1, 2.0, 0.0);
         assert_eq!(doc.opening_ids().len(), 1);
         doc.delete_wall(1);
-        assert!(doc.opening_ids().is_empty(), "opening should die with its wall");
+        assert!(
+            doc.opening_ids().is_empty(),
+            "opening should die with its wall"
+        );
         assert!(doc.undo());
         assert_eq!(doc.wall_count(), 2);
-        assert_eq!(doc.opening_ids().len(), 1, "undo restores the wall's opening");
+        assert_eq!(
+            doc.opening_ids().len(),
+            1,
+            "undo restores the wall's opening"
+        );
     }
 
     #[test]
@@ -1521,7 +1548,10 @@ mod tests {
             .into_iter()
             .map(|id| restored.furnishing_asset_id(id))
             .collect();
-        assert_eq!(ids, vec!["sheen-chair".to_string(), "couch-medium".to_string()]);
+        assert_eq!(
+            ids,
+            vec!["sheen-chair".to_string(), "couch-medium".to_string()]
+        );
     }
 
     #[test]
@@ -1587,8 +1617,14 @@ mod tests {
         let mut doc = furnished_room();
         let before = doc.save_json();
 
-        assert_eq!(doc.load_document("not json at all"), Err(LoadError::Corrupt));
-        assert_eq!(doc.load_document("{\"version\":1}"), Err(LoadError::Corrupt));
+        assert_eq!(
+            doc.load_document("not json at all"),
+            Err(LoadError::Corrupt)
+        );
+        assert_eq!(
+            doc.load_document("{\"version\":1}"),
+            Err(LoadError::Corrupt)
+        );
         assert_eq!(doc.save_json(), before);
     }
 

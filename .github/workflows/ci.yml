@@ -23,6 +23,24 @@ jobs:
       # keep it that way is to refuse the first warning rather than the hundredth.
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      # Its own job rather than a step in `rust`: formatting needs no build, so it answers
+      # in seconds instead of waiting behind the test and clippy runs — the same reason
+      # `vitest` is not a step inside the browser suite. It also reports separately, so
+      # "your formatting is off" never looks like "your tests failed".
+      #
+      # This gate is only honest because the tree was reformatted in the same PR that
+      # added it. A check bolted onto an unformatted tree is red on arrival and gets
+      # ignored; the reformat without the check drifts back within a week.
+      - run: cargo fmt --all --check
+
   unit:
     name: vitest
     runs-on: ubuntu-latest
