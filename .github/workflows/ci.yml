@@ -24,7 +24,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   web:
-    name: tsc + browser smoke test
+    name: tsc + browser suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

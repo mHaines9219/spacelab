@@ -83,8 +83,10 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
   across four files, nearly all pre-existing. Landing the sweep while three branches hold
   those exact files is the one change guaranteed to conflict with all of them, so it is
   sequenced after they merge: own commit, then the gate.
-- **CI has never actually run** — the workflow is asserted correct by reading, not by a
-  green tick, and the first PR to include it is the first real test of it.
+- **The browser job takes ~8 minutes on CI against ~27 seconds locally.** Headless
+  Chromium has no GPU, so every frame goes through software GL (swiftshader). Workable at
+  17 tests; it will not stay workable indefinitely, and sharding or trimming the WASM
+  rebuild is the lever when it stops being.
 - The suite is **one browser, one room shape**, and it does not drive the Draw flow, the
   3D pointer-drag path, or camera framing. Wall ids `0`/`1` are assumed from
   `build_room`'s index assignment, which the resize fix is about to change — those tests
