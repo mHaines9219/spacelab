@@ -35,7 +35,7 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
 | M3 — Look | 🚧 (renderer basics landed early, during M1) |
-| M5 — Persistence & sharing | ⬜ **in MVP** |
+| M5 — Persistence & sharing | 🚧 save/load ✅ **(the MVP slice)** — share links and glTF/USDZ export deferred |
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
