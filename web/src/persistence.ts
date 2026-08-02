@@ -80,13 +80,20 @@ export function clearSaved(): void {
 /**
  * Copy the room aside before an import overwrites it. Call this *before* the load, so
  * that a load which succeeds but wasn't what the user wanted is still recoverable.
+ *
+ * Returns false when the net could not be written (quota, unavailable storage). The
+ * import should still proceed — refusing it because the safety net failed would be a
+ * lock, not a net — but the caller **must** distinguish the two, because a UI that says
+ * "your previous room is saved" when it isn't is worse than offering no net at all.
  */
-export function stashPrevious(json: string): void {
+export function stashPrevious(json: string): boolean {
   try {
-    storage()?.setItem(PREVIOUS_KEY, json);
+    const store = storage();
+    if (!store) return false;
+    store.setItem(PREVIOUS_KEY, json);
+    return true;
   } catch {
-    // Out of quota. The import still proceeds — refusing it would be a worse outcome
-    // than proceeding without the safety net, but the caller is told so it can say so.
+    return false;
   }
 }
 
