@@ -157,8 +157,12 @@ export type LoadOutcome =
 
 export type ViewportHandle = {
   dispose: () => void;
-  /** Place a catalog asset in the room and select it. */
-  addFromCatalog: (entry: CatalogEntry) => Promise<void>;
+  /**
+   * Place a catalog asset in the room and select it. With `asideSlot` set, the piece drops
+   * into a staging line off to the side (its 0-based index in the set) instead of the room
+   * centre — used when a whole AI-suggested set lands at once.
+   */
+  addFromCatalog: (entry: CatalogEntry, asideSlot?: number) => Promise<void>;
   /** Remove the selected furnishing, if any. */
   removeSelected: () => void;
   /** Set the selected furnishing aside into the bullpen, if any. */
@@ -704,13 +708,20 @@ export async function createViewport(
     onSelection(selectionPayload());
   };
 
-  const addFromCatalog = async (entry: CatalogEntry) => {
+  const addFromCatalog = async (entry: CatalogEntry, asideSlot?: number) => {
     const { w, h, d } = entry.dims_m;
     // The catalog id goes into the document, not just this map: `placed` dies with the
     // page, so a saved room that only knew the box dimensions would restore as
     // correctly-sized invisible furniture. `placed` stays as the JS-side cache of the
     // full entry (thumbnail, title, blob url); the document owns *which* entry it is.
-    const id = doc.add_furnishing(entry.asset_id, w, h, d);
+    //
+    // A whole set arriving at once (an AI proposal) lines up off to the side via
+    // `add_furnishing_aside`; a lone catalog click still drops at the centre. Rust owns
+    // where either lands — this only picks which door to knock on.
+    const id =
+      asideSlot === undefined
+        ? doc.add_furnishing(entry.asset_id, w, h, d)
+        : doc.add_furnishing_aside(entry.asset_id, w, h, d, asideSlot);
     placed.set(id, entry);
     const template = await getTemplate(urlOf(entry));
     selectedId = id; // so the fresh mesh shows its selection box

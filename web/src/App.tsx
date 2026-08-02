@@ -160,6 +160,11 @@ export function App() {
    * rules hold. Finishes are set first (and the local swatch state synced) so the room
    * mood is right the moment the pieces drop in. Placement is awaited one at a time
    * because `addFromCatalog` is async and each drop reads and advances the selection.
+   *
+   * The pieces land in a staging line off to the side rather than the room centre: a set
+   * that all arrives at once reads as a heap if it stacks in the middle, so each drop
+   * carries its running index and Rust lines them up. The user pulls pieces from the row
+   * into place.
    */
   const applyStyle = async (proposal: StyleProposal) => {
     const handle = handleRef.current;
@@ -171,9 +176,11 @@ export function App() {
     setWall(wallIndex);
     handle.setLighting(lightingIndex);
     setLighting(lightingIndex);
+    let slot = 0;
     for (const pick of proposal.furniture) {
       for (let n = 0; n < pick.count; n++) {
-        await handle.addFromCatalog(pick.entry);
+        await handle.addFromCatalog(pick.entry, slot);
+        slot++;
       }
     }
   };

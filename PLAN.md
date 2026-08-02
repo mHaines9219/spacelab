@@ -100,6 +100,47 @@ yet satisfied, and the rows say so rather than rounding up.
   re-fetch path so far; the others could move to `fetch` descriptors too (Kenney needs the
   kit zip, which isn't re-downloadable by URL).
 
+### An AI-suggested set lands in a row off to the side, not a heap in the middle · 2026-08-02
+
+**Accomplished**
+
+- **An applied style proposal now drops its pieces in a staging line against one wall
+  instead of stacking them at the room centre.** A whole set arriving at once read as a
+  pile on the rug — each piece landed at the same `drop_target` (room centre + a 0.3 m
+  diagonal nudge that cycles every five), so a proposal of several pieces overlapped in the
+  middle of the floor with the finishes it just set barely visible under them. They now line
+  up off to the side for the user to pull from.
+- **The line math lives in Rust, not the resolver.** Rule 1 — no geometry in JavaScript —
+  so `add_furnishing_aside(asset_id, extent, slot)` is the AI path's counterpart to
+  `add_furnishing`; both share a new `place_new` and differ only in the target. `aside_target`
+  reads the floor bounds, runs the row along the room's longer side inset from the near wall,
+  and steps each `slot` down it. `applyStyle` just carries each drop's running index; the web
+  layer picks the door, Rust decides where the piece lands.
+- **The inset is inside the snap radius on purpose**, so `reseat` seats each piece flush
+  against the wall it lines up along — a clean back-to-the-wall tray rather than a free-
+  floating row. A lone catalog click still drops at the centre where the user is looking;
+  only a proposal's batch routes aside.
+- Verified: **new Rust test** pins that a three-piece set hugs the side wall (small `z`, far
+  from the room-centre `z`) and steps along the row rather than stacking. Full Rust suite
+  green (44 in `wasm-bindings`, 127 across the workspace), `tsc` clean, WASM binding
+  regenerated so the web sees the new method.
+
+**Remains**
+
+- **Spacing and clamping are fixed constants, not fitted to the pieces.** The row steps by a
+  flat 0.8 m regardless of piece width, so two wide pieces can still touch (`reseat` snaps to
+  walls but does not resolve furniture-vs-furniture overlap), and an over-long set piles at
+  the far corner once it hits the clamp rather than wrapping to a second row. Fine for the
+  handful a proposal returns today; a larger set would show it.
+- **The row always hugs the near/left wall**, chosen by the longer axis alone — it does not
+  avoid a wall that already has a door or window on it, so a piece can line up in front of an
+  opening. Furniture-vs-opening is unbuilt (it sits with the M2 clearance work below).
+- Carried forward from the M3 entry below: **the web side still has no formatter** (`cargo fmt`
+  is gated, `prettier` is not in the tree — this PR adds no `web/src/` files but edits two);
+  **M2** still owes walkway clearance and furniture-vs-wall; **M5** is the save/load slice
+  only; the unit layer covers four `web/src/` modules rather than the whole; the browser suite
+  is ~12 minutes every PR pays.
+
 ### M3 ✅ — the camera now solves for the room instead of guessing at it · 2026-08-02
 
 **Accomplished**
