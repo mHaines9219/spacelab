@@ -39,6 +39,58 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### Fix: a deleted wall no longer leaves its door hanging in mid-air · 2026-08-01
+
+**Accomplished**
+
+- **Deleting a wall now takes its openings off screen with it.** The document was always
+  right — `Command::DeleteWall` cascades a wall's openings away and
+  `deleting_a_wall_removes_its_openings` has guarded that since the doors-and-windows PR.
+  The renderer never got the message: `deleteSelectedWall` re-uploaded the wall mesh and
+  rebuilt the wall pick boxes but **not** the opening proxies, so the door's pick box and
+  selection outline stayed in the scene, floating where the wall used to be. Found by
+  Bumble while building the browser suite — **58 Rust tests, all green, all correct, and
+  the app still drew a floating door.**
+- **Fixed by pairing the two rather than adding a third call.** An opening is a hole in a
+  wall, so any edit that re-uploads the wall mesh has to re-derive the openings —
+  `rebuildOpenings` now runs inside `syncRoomGeometry`, which is the one place every wall
+  edit already goes through. That closed **three** sites at once, not one: the keyboard
+  delete path, the `handle.deleteWall` API (which was also missing `rebuildWallPicks`, so
+  a deleted wall's pick box stayed clickable), and the `__deleteWallById` probe. Six now-
+  redundant `rebuildOpenings()` calls came back out, one of which was on the
+  opening-drag path and had been rebuilding every proxy twice per pointer move.
+- **A selection can no longer outlive its opening.** `rebuildOpenings` drops
+  `selectedOpening` when the document no longer has it, so deleting a wall under a
+  *selected* door also closes the door panel instead of leaving it editable — visible in
+  the before/after screenshots as the DOOR width/height panel that stays up on `main`.
+- Verified: **92 tests green across the workspace + clippy clean**, `tsc` clean (this
+  change adds no Rust tests — the count is the base's, and it is unchanged by it). Because
+  this is a rendering bug that all 91 Rust tests pass straight through, the real proof is
+  the browser: the same driver run against `main` and this branch, place a door on wall 0
+  then delete wall 0 — `__openingCount` stays **1 on `main`** (mesh survives) and drops to
+  **0 here**, while `__wallCount` 2→1 and `__wallTris` 38→12 identically on both.
+
+**Remains**
+
+- **`__deleteWallById` still mirrors `deleteSelectedWall` by hand.** It is correct now, but
+  it is a second copy of the same sequence rather than a call into the first, so the two
+  can drift again. Bumble's sharper point stands: a probe that shares the production
+  path's omission can only ever agree with the bug.
+- **No committed regression test.** The check above was a throwaway driver, again. This is
+  exactly the gap Bumble's browser suite closes, and `__openingCount` already exposes it —
+  an `openings.spec` assertion that it drops to 0 after a wall delete is the test, and it
+  belongs in that suite rather than in a fourth ad-hoc script.
+- **`rebuildOpenings` inside `syncRoomGeometry` is unconditional.** Every wall edit now
+  disposes and recreates every opening proxy. Correct and unmeasurable at this count, but
+  it makes the coarse rebuild the only path — a bigger model would want a targeted
+  re-emit, which the doors-and-windows entry already flagged for the wall mesh itself.
+- Carried: the `set_rectangle` rebuild still wipes hand-added walls and their openings —
+  the last open M1 item and next in this lane; wall ids will collide once those walls
+  survive (`build_room` reassigns `id: i as u32`, `add_wall` takes `max+1`); furniture
+  casts no shadow on the floor (M3, not a regression); `front=+Z` unverified; thumbnails
+  uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan USD round-trip
+  (schema half answered in `RESEARCH/ROOMPLAN_SCHEMA_FIT.md`, hardware half blocked); fps
+  on one machine; `cargo fmt` reports 13 diffs across the three crates.
 ### A committed browser suite, CI, and a guard on this log · 2026-08-01
 
 **Accomplished**
