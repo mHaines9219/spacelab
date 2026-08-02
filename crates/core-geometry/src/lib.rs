@@ -161,12 +161,32 @@ fn emit_reveals(wall: &Wall, a0: f32, a1: f32, o: &Opening, out: &mut MeshBuffer
 
     // Sill (skipped for a floor-standing door) faces up; head faces down.
     if sill > EPS {
-        out.quad(p(a0, sill, -1.0), p(a0, sill, 1.0), p(a1, sill, 1.0), p(a1, sill, -1.0));
+        out.quad(
+            p(a0, sill, -1.0),
+            p(a0, sill, 1.0),
+            p(a1, sill, 1.0),
+            p(a1, sill, -1.0),
+        );
     }
-    out.quad(p(a0, head, -1.0), p(a1, head, -1.0), p(a1, head, 1.0), p(a0, head, 1.0));
+    out.quad(
+        p(a0, head, -1.0),
+        p(a1, head, -1.0),
+        p(a1, head, 1.0),
+        p(a0, head, 1.0),
+    );
     // Jambs at each end, normals pointing inward along the wall.
-    out.quad(p(a0, sill, -1.0), p(a0, head, -1.0), p(a0, head, 1.0), p(a0, sill, 1.0));
-    out.quad(p(a1, sill, -1.0), p(a1, sill, 1.0), p(a1, head, 1.0), p(a1, head, -1.0));
+    out.quad(
+        p(a0, sill, -1.0),
+        p(a0, head, -1.0),
+        p(a0, head, 1.0),
+        p(a0, sill, 1.0),
+    );
+    out.quad(
+        p(a1, sill, -1.0),
+        p(a1, sill, 1.0),
+        p(a1, head, 1.0),
+        p(a1, head, -1.0),
+    );
 }
 
 /// Clamp a desired centre position so an opening of `width` sits wholly within the wall.
@@ -244,9 +264,9 @@ fn triangulate(poly: &[Vec2]) -> Vec<[usize; 3]> {
             let (pa, pb, pc) = (poly[a], poly[b], poly[c]);
             // Convex corner (left turn), and no other vertex falls inside the ear.
             if (pb - pa).perp_dot(pc - pb) > 0.0
-                && !idx.iter().any(|&v| {
-                    v != a && v != b && v != c && point_in_triangle(poly[v], pa, pb, pc)
-                })
+                && !idx
+                    .iter()
+                    .any(|&v| v != a && v != b && v != c && point_in_triangle(poly[v], pa, pb, pc))
             {
                 tris.push([a, b, c]);
                 idx.remove(i);
@@ -409,7 +429,10 @@ mod tests {
             // centroid sits inside the doorway footprint and below the head, it's a leak.
             let on_face = (c.z.abs() - 0.06).abs() < 1e-3;
             let inside = c.x > a0 + 1e-3 && c.x < a1 - 1e-3 && c.y < door.head() - 1e-3;
-            assert!(!(on_face && inside), "face quad {c} sits inside the doorway");
+            assert!(
+                !(on_face && inside),
+                "face quad {c} sits inside the doorway"
+            );
         }
     }
 
@@ -450,7 +473,10 @@ mod tests {
                 && c.y < win.head() + 1e-3
                 && c.z.abs() < 0.05; // reveals live within the thickness, not on the faces
             if near_void {
-                assert!((centre - c).dot(n) > 0.0, "reveal normal {n} at {c} faces away from the void");
+                assert!(
+                    (centre - c).dot(n) > 0.0,
+                    "reveal normal {n} at {c} faces away from the void"
+                );
             }
         }
     }
@@ -678,7 +704,10 @@ mod tests {
                 (wall.start.y + wall.end.y) * 0.5,
             );
             for (centroid, normal) in face_normals(&mesh) {
-                assert!(normal.is_finite(), "wall {index}: non-finite normal {normal}");
+                assert!(
+                    normal.is_finite(),
+                    "wall {index}: non-finite normal {normal}"
+                );
                 assert!(
                     (centroid - centre).dot(normal) > 0.0,
                     "wall {index}: inward-facing normal {normal} at {centroid}"
@@ -706,7 +735,10 @@ mod tests {
         let mesh = shell_mesh(&scene);
         assert!(mesh.triangle_count() > 0);
         assert!(
-            mesh.positions.iter().chain(&mesh.normals).all(|v| v.is_finite()),
+            mesh.positions
+                .iter()
+                .chain(&mesh.normals)
+                .all(|v| v.is_finite()),
             "degenerate stub emitted non-finite geometry"
         );
     }
@@ -772,12 +804,19 @@ mod tests {
             assert_eq!(scene.walls.len(), (4 - delete_count) as usize);
             let mut mesh = MeshBuffers::default();
             floor_mesh(&scene, &mut mesh);
-            assert_eq!(mesh.triangle_count(), 2, "{delete_count} deleted: floor changed");
+            assert_eq!(
+                mesh.triangle_count(),
+                2,
+                "{delete_count} deleted: floor changed"
+            );
             let area: f32 = mesh_triangles(&mesh)
                 .into_iter()
                 .map(|[a, b, c]| (b - a).cross(c - a).length() * 0.5)
                 .sum();
-            assert!((area - 12.0).abs() < 1e-4, "{delete_count} deleted: area {area}");
+            assert!(
+                (area - 12.0).abs() < 1e-4,
+                "{delete_count} deleted: area {area}"
+            );
         }
     }
 
@@ -818,7 +857,8 @@ mod tests {
 
     #[test]
     fn open_floor_placement_follows_the_cursor() {
-        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 1.7), 0.35);
+        let placement =
+            resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 1.7), 0.35);
         assert_eq!(placement.anchor, Anchor::Floor);
         assert_eq!(placement.position, Vec3::new(2.1, 0.0, 1.7));
         assert_eq!(placement.yaw, 0.0);
@@ -826,7 +866,8 @@ mod tests {
 
     #[test]
     fn nearby_wall_seats_the_back_face_against_it() {
-        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 0.4), 0.35);
+        let placement =
+            resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 0.4), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(0));
         // 0.06 wall half-thickness + 0.285 chair half-depth
         assert!((placement.position.z - 0.345).abs() < 1e-5);
@@ -853,7 +894,8 @@ mod tests {
 
     #[test]
     fn perpendicular_wall_yaws_the_asset_to_match() {
-        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(0.3, 1.7), 0.35);
+        let placement =
+            resolve_placement(&corner_room(), &chair_asset(), Vec2::new(0.3, 1.7), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(1));
         assert!((placement.position.x - 0.345).abs() < 1e-5);
         assert!((placement.yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
@@ -861,20 +903,23 @@ mod tests {
 
     #[test]
     fn placement_slides_along_the_wall_instead_of_overhanging_it() {
-        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(4.6, 0.3), 0.35);
+        let placement =
+            resolve_placement(&corner_room(), &chair_asset(), Vec2::new(4.6, 0.3), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(0));
         assert!((placement.position.x - (4.2 - 0.415)).abs() < 1e-5);
     }
 
     #[test]
     fn overlapping_the_wall_pushes_the_asset_back_out() {
-        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 0.02), 0.35);
+        let placement =
+            resolve_placement(&corner_room(), &chair_asset(), Vec2::new(2.1, 0.02), 0.35);
         assert!((placement.position.z - 0.345).abs() < 1e-5);
     }
 
     #[test]
     fn the_nearest_wall_wins_in_a_corner() {
-        let placement = resolve_placement(&corner_room(), &chair_asset(), Vec2::new(0.25, 0.4), 0.35);
+        let placement =
+            resolve_placement(&corner_room(), &chair_asset(), Vec2::new(0.25, 0.4), 0.35);
         assert_eq!(placement.anchor, Anchor::AgainstWall(1));
     }
 
