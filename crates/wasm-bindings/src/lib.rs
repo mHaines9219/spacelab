@@ -14,6 +14,27 @@ use core_scene::{
     OpeningId, OpeningKind, Placement, Scene, Wall, WallMaterial,
 };
 use glam::{Vec2, Vec3};
+use serde::{Deserialize, Serialize};
+
+/// SPIKE: the v1 envelope. Version is checked, not decorative; every field defaults so a
+/// later addition cannot invalidate an existing save.
+#[derive(Serialize, Deserialize)]
+struct SaveFile {
+    version: u32,
+    #[serde(default)]
+    scene: Scene,
+    #[serde(default)]
+    next_ids: NextIds,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct NextIds {
+    #[serde(default)]
+    opening: OpeningId,
+    #[serde(default)]
+    furnishing: FurnishingId,
+}
+
 use wasm_bindgen::prelude::*;
 
 const SNAP_RADIUS: f32 = 0.35;
@@ -100,6 +121,39 @@ impl Document {
 
     pub fn wall_count(&self) -> usize {
         self.scene.walls.len()
+    }
+
+    // --- SPIKE: M5 save/load round-trip, measurement only --------------------
+
+    /// Serialize the document in the v1 envelope from `PLANS/M5_SAVE_FORMAT.md`.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(&SaveFile {
+            version: 1,
+            scene: self.scene.clone(),
+            next_ids: NextIds {
+                opening: self.next_opening_id,
+                furnishing: self.next_id,
+            },
+        })
+        .unwrap_or_default()
+    }
+
+    /// Restore from the v1 envelope. Returns false on a parse failure or a newer version.
+    pub fn from_json(&mut self, text: &str) -> bool {
+        let Ok(save) = serde_json::from_str::<SaveFile>(text) else {
+            return false;
+        };
+        if save.version > 1 {
+            return false;
+        }
+        self.scene = save.scene;
+        self.next_opening_id = save.next_ids.opening;
+        self.next_id = save.next_ids.furnishing;
+        self.selected = None;
+        self.selected_opening = None;
+        self.history.clear();
+        self.rebuild();
+        true
     }
 
     // --- Room construction -------------------------------------------------
@@ -1248,5 +1302,48 @@ mod tests {
         // the warning — it is re-read from the document, so it rewinds with it.
         assert!(doc.undo());
         assert_eq!(doc.crowded_ids(), vec![first, second]);
+    }
+}
+
+#[cfg(test)]
+mod serde_spike {
+    use super::*;
+
+    /// The design doc's "first test to write": save → load → save is byte-identical, and
+    /// the loaded document answers id-keyed queries the same way the original did.
+    #[test]
+    fn round_trip_is_stable_and_preserves_ids() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        doc.add_wall(4.0, 0.0, 4.0, 3.0);
+        let wall = *doc.wall_ids().last().unwrap();
+        doc.add_opening(0, wall, 4.0, 1.5);
+
+        let first = doc.to_json();
+        let (walls, openings, bounds) = (doc.wall_ids(), doc.opening_ids(), doc.room_bounds());
+
+        let mut restored = Document::new();
+        assert!(restored.from_json(&first));
+        assert_eq!(restored.to_json(), first, "save→load→save is not stable");
+        assert_eq!(restored.wall_ids(), walls);
+        assert_eq!(restored.opening_ids(), openings);
+        assert_eq!(restored.room_bounds(), bounds);
+
+        // The allocator survived, so a new id cannot collide with a restored one.
+        restored.add_wall(0.0, 3.0, 4.0, 3.0);
+        let after = restored.wall_ids();
+        let mut unique = after.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), after.len(), "id reused after reload: {after:?}");
+    }
+
+    #[test]
+    fn a_newer_version_is_refused_rather_than_half_parsed() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        let before = doc.to_json();
+        assert!(!doc.from_json(&before.replace("\"version\":1", "\"version\":2")));
+        assert_eq!(doc.to_json(), before, "a refused load still mutated the document");
     }
 }

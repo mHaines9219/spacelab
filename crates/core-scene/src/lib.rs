@@ -1,13 +1,14 @@
 //! Parametric scene document: walls, openings, furnishings, and the command layer all mutations flow through.
 
 use glam::{Vec2, Vec3};
+use serde::{Deserialize, Serialize};
 
 pub type WallId = u32;
 pub type FurnishingId = u32;
 pub type OpeningId = u32;
 
 /// Ground-plane coordinates are metres as `Vec2(x, z)`; `Vec3` is `(x, up, z)`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Wall {
     pub id: WallId,
     pub start: Vec2,
@@ -51,14 +52,14 @@ impl Wall {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Anchor {
     Floor,
     AgainstWall(WallId),
 }
 
 /// A door or window. Ordinal matches the flag the wasm boundary exchanges with the web.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OpeningKind {
     Door,
     Window,
@@ -67,7 +68,7 @@ pub enum OpeningKind {
 /// A parametric cut *owned by* a wall: a door or window. Position is a distance along
 /// the wall centreline, so moving or resizing the wall carries the opening with it —
 /// the opening never stores world coordinates of its own.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Opening {
     pub id: OpeningId,
     pub wall: WallId,
@@ -92,7 +93,7 @@ impl Opening {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Placement {
     pub position: Vec3,
     pub yaw: f32,
@@ -101,12 +102,12 @@ pub struct Placement {
 
 /// Catalog metadata the constraint solver needs. `extent` is width/height/depth in
 /// metres, with local `+Z` as the asset's front.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Asset {
     pub extent: Vec3,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Furnishing {
     pub id: FurnishingId,
     pub asset: Asset,
@@ -123,7 +124,7 @@ pub struct Furnishing {
 /// The floor's surface finish. The document owns the *choice*; the renderer owns
 /// what each finish looks like (which texture, how it tiles). Ordinal matches the
 /// index the wasm boundary exchanges with the web layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum FloorMaterial {
     #[default]
     WoodLight,
@@ -136,7 +137,7 @@ pub enum FloorMaterial {
 /// *choice*, the renderer owns what each finish looks like (here, a tint over the one
 /// shared matte plaster set — walls differ by colour, not by texture). Ordinal matches
 /// the index the wasm boundary exchanges with the web layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WallMaterial {
     /// The fixed off-white the walls carried before finishes were selectable, so an
     /// existing room opens looking exactly as it did.
@@ -152,7 +153,7 @@ pub enum WallMaterial {
 /// renderer owns what each preset means (sun colour, angle and intensity, how much the
 /// environment fills the shadows). Ordinal matches the index the wasm boundary
 /// exchanges with the web layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LightingPreset {
     /// The high neutral sun the scene carried before lighting was selectable.
     #[default]
@@ -162,7 +163,7 @@ pub enum LightingPreset {
     Overcast,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Scene {
     pub walls: Vec<Wall>,
     /// Doors and windows, each owned by a wall (`Opening::wall`). Kept in a flat list
