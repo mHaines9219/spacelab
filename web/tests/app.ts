@@ -8,7 +8,8 @@ import { probe } from "./fixtures";
 
 /** Open the app and generate a rectangular room at the form's default size. */
 export async function openRectangleRoom(page: Page) {
-  await page.goto("/");
+  // The editor lives at /editor now that / is the landing page (accounts work).
+  await page.goto("/editor");
   await page.getByRole("button", { name: /Rectangle/ }).click();
   await page.getByRole("button", { name: "create room" }).click();
   // A generated rectangle raises only the two far walls; wait on that rather than a
@@ -59,7 +60,7 @@ export async function enclosedReadout(page: Page) {
  * is why this is the only flow that produces an enclosed area to read.
  */
 export async function traceClosedRoom(page: Page) {
-  await page.goto("/");
+  await page.goto("/editor");
   await page.getByRole("button", { name: /Draw/ }).click();
   const svg = await page.locator("svg.draw-canvas").boundingBox();
   if (!svg) throw new Error("draw canvas has no bounding box");

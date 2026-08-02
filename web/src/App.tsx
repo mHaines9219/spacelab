@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "./AuthContext";
+import { createProject, getProject, updateProject } from "./portfolio";
 import {
   createViewport,
   type BullpenItem,
@@ -86,6 +89,15 @@ export function App() {
   const revisionPollRef = useRef<number | undefined>(undefined);
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  // Cloud portfolio bridge. The working store is still localStorage (see persistence.ts);
+  // these only power the *manual* "save to portfolio" and opening a room from ?project=.
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { user, configured } = useAuth();
+  /** The portfolio project this room is bound to, once saved or opened from the cloud. */
+  const [cloudProject, setCloudProject] = useState<{ id: string; name: string } | null>(null);
+  const [savingCloud, setSavingCloud] = useState(false);
+
   // One offscreen thumbnail renderer, shared by the catalog and the bullpen so a
   // re-import's card hits the cache the catalog already warmed.
   const thumbRef = useRef<Thumbnailer | null>(null);
@@ -106,7 +118,11 @@ export function App() {
     ).then(
       async (handle) => {
         handleRef.current = handle;
-        await restoreSavedRoom(handle);
+        // Opening a specific portfolio project takes precedence over the local autosave;
+        // otherwise restore whatever was last worked on locally.
+        const projectId = searchParams.get("project");
+        if (projectId) await loadCloudProject(handle, projectId);
+        else await restoreSavedRoom(handle);
         startAutosave(handle);
       },
       (cause) => setError(String(cause)),
@@ -150,6 +166,82 @@ export function App() {
     // Only show the room once it is actually restored — `loadJson` resolves after the
     // furnishing meshes load, so this cannot flash an empty room first.
     if (!outcome.ui.empty) setStage("scene");
+  };
+
+  /**
+   * Open a room from the cloud portfolio (?project=<id>). The document is Rust's opaque
+   * envelope, stored as jsonb — so it is stringified straight back into `loadJson`, never
+   * inspected here. A brand-new project has no document yet; that is not an error, it just
+   * opens the editor empty and bound to that project so the first save fills it in.
+   */
+  const loadCloudProject = async (handle: ViewportHandle, id: string) => {
+    let project;
+    try {
+      project = await getProject(id);
+    } catch {
+      setNotice("That project could not be opened.");
+      return;
+    }
+    setCloudProject({ id: project.id, name: project.name });
+    if (project.document == null) return;
+    const outcome = await handle.loadJson(JSON.stringify(project.document));
+    if (!outcome.ok) {
+      setNotice(
+        outcome.reason === "version"
+          ? "This room was saved by a newer version of Spacelab and can’t be opened here."
+          : "This project’s room could not be read.",
+      );
+      return;
+    }
+    setFloor(outcome.ui.floorIndex);
+    setWall(outcome.ui.wallIndex);
+    setLighting(outcome.ui.lightingIndex);
+    if (!outcome.ui.empty && outcome.ui.room) setRoom({ ...outcome.ui.room, square: false });
+    if (!outcome.ui.empty) setStage("scene");
+  };
+
+  /**
+   * Push the current room to the cloud portfolio — the *manual* save the plan calls for.
+   * Reuses the same `saveJson()` envelope the local autosave and file export use, so the
+   * cloud copy is byte-identical to what a download would produce. Binds to a project on
+   * first save so subsequent saves update in place rather than piling up duplicates.
+   */
+  const saveToPortfolio = async () => {
+    const handle = handleRef.current;
+    if (!handle) return;
+    if (!user) {
+      navigate("/"); // not signed in — send them to the front door to sign in first
+      return;
+    }
+    let name = cloudProject?.name ?? null;
+    if (!cloudProject) {
+      name = window.prompt("Name this room for your portfolio", "Untitled room")?.trim() || null;
+      if (!name) return;
+    }
+    // Flush first so the saved copy matches what is on screen, not the last idle state.
+    autosaveRef.current?.flush();
+    let doc: unknown;
+    try {
+      doc = JSON.parse(handle.saveJson());
+    } catch {
+      setNotice("This room could not be prepared to save.");
+      return;
+    }
+    setSavingCloud(true);
+    try {
+      if (cloudProject) {
+        await updateProject(cloudProject.id, { document: doc });
+        setNotice(`Saved to “${cloudProject.name}”.`);
+      } else {
+        const created = await createProject({ name: name!, document: doc });
+        setCloudProject({ id: created.id, name: created.name });
+        setNotice(`Saved “${created.name}” to your portfolio.`);
+      }
+    } catch {
+      setNotice("Couldn’t save to your portfolio — check your connection and try again.");
+    } finally {
+      setSavingCloud(false);
+    }
   };
 
   /**
@@ -320,6 +412,16 @@ export function App() {
   return (
     <>
       <canvas ref={canvasRef} />
+
+      <EditorNav
+        configured={configured}
+        signedIn={!!user}
+        projectName={cloudProject?.name ?? null}
+        saving={savingCloud}
+        canSave={stage === "scene"}
+        onSave={saveToPortfolio}
+        onHome={() => navigate(user ? "/dashboard" : "/")}
+      />
 
       {notice && (
         <div className="banner" role="status">
@@ -528,6 +630,53 @@ export function App() {
         </>
       )}
     </>
+  );
+}
+
+/**
+ * The editor's top-right link back to the account world, and the manual "save to
+ * portfolio". Kept intentionally thin: when accounts aren't configured (e.g. CI) only the
+ * home link shows, so the editor is unchanged for anyone not using the cloud.
+ */
+function EditorNav({
+  configured,
+  signedIn,
+  projectName,
+  saving,
+  canSave,
+  onSave,
+  onHome,
+}: {
+  configured: boolean;
+  signedIn: boolean;
+  projectName: string | null;
+  saving: boolean;
+  canSave: boolean;
+  onSave: () => void;
+  onHome: () => void;
+}) {
+  return (
+    <div className="editor-nav">
+      {projectName && <span className="editor-nav-name">{projectName}</span>}
+      {configured &&
+        (signedIn ? (
+          <button
+            type="button"
+            className="reset"
+            disabled={!canSave || saving}
+            onClick={onSave}
+          >
+            {saving ? "saving…" : "save to portfolio"}
+          </button>
+        ) : (
+          <button type="button" className="reset" onClick={onHome}>
+            sign in to save
+          </button>
+        ))}
+      <button type="button" className="reset" onClick={onHome}>
+        {signedIn ? "dashboard" : "home"}
+      </button>
+    </div>
   );
 }
 
