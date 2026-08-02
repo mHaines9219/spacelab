@@ -479,10 +479,36 @@ impl Document {
     /// The catalog id is stored on the document rather than kept in a JS map, so a saved
     /// room knows *which* furniture it holds and not merely the size of the boxes.
     pub fn add_furnishing(&mut self, asset_id: &str, ex: f32, ey: f32, ez: f32) -> u32 {
+        let drop = self.drop_target();
+        self.place_new(asset_id, ex, ey, ez, drop)
+    }
+
+    /// Place a catalog asset in a staging line along one side of the room, rather than at
+    /// the centre, and select it. `slot` is the piece's 0-based index within the set.
+    ///
+    /// Used when a whole set lands at once — an AI style proposal. A heap in the middle of
+    /// the floor is worse than a tidy row off to the side that the user pulls pieces from,
+    /// so those placements route here instead of `add_furnishing`. Otherwise identical:
+    /// same reseat, so a piece still snaps against the wall it lines up against.
+    pub fn add_furnishing_aside(
+        &mut self,
+        asset_id: &str,
+        ex: f32,
+        ey: f32,
+        ez: f32,
+        slot: u32,
+    ) -> u32 {
+        let drop = self.aside_target(slot);
+        self.place_new(asset_id, ex, ey, ez, drop)
+    }
+
+    /// Add one furnishing at `drop`, select it, and reseat so it snaps if `drop` is near a
+    /// wall. Shared by the centre drop (`add_furnishing`) and the staging line
+    /// (`add_furnishing_aside`); only the target differs.
+    fn place_new(&mut self, asset_id: &str, ex: f32, ey: f32, ez: f32, drop: Vec2) -> u32 {
         self.checkpoint();
         let id = self.next_id;
         self.next_id += 1;
-        let drop = self.drop_target();
         self.scene.apply(Command::AddFurnishing(Furnishing {
             id,
             asset: Asset {
@@ -507,6 +533,42 @@ impl Document {
     fn drop_target(&self) -> Vec2 {
         let n = (self.scene.placed_furnishings().count() % 5) as f32;
         self.room_centre() + Vec2::splat(0.3) * n
+    }
+
+    /// A drop point in a row just inside one wall, stepping along the room's longer side.
+    /// `slot` is the piece's index in the set, so successive pieces walk down the row.
+    ///
+    /// The row hugs the min corner of the shorter axis and runs along the longer one, which
+    /// is where the most pieces fit before the far wall. `INSET` sits the row close enough
+    /// that `reseat` snaps each piece flush against that wall (a clean back-to-the-wall
+    /// tray), while `START`/`STEP` keep the first piece clear of the corner and space the
+    /// rest out. The far end is clamped so an over-long set piles at the corner rather than
+    /// marching through the wall. Falls back to the origin when there is no room yet.
+    fn aside_target(&self, slot: u32) -> Vec2 {
+        let outline = &self.scene.floor_outline;
+        if outline.is_empty() {
+            return Vec2::ZERO;
+        }
+        let mut min = Vec2::splat(f32::INFINITY);
+        let mut max = Vec2::splat(f32::NEG_INFINITY);
+        for &p in outline {
+            min = min.min(p);
+            max = max.max(p);
+        }
+
+        const INSET: f32 = 0.4; // from the side wall — inside the snap radius, so pieces seat flush
+        const START: f32 = 0.8; // from the near corner, so the first piece owns the side wall not the end one
+        const STEP: f32 = 0.8; // between successive pieces along the row
+
+        let span = max - min;
+        let along = START + STEP * slot as f32;
+        if span.x >= span.y {
+            // Longer in x: run the row along the min-y (near) wall.
+            Vec2::new((min.x + along).min(max.x - START), min.y + INSET)
+        } else {
+            // Longer in y: run the row along the min-x (near) wall.
+            Vec2::new(min.x + INSET, (min.y + along).min(max.y - START))
+        }
     }
 
     /// Remove the selected furnishing (if any). Returns true if one was removed.
@@ -1316,6 +1378,31 @@ mod tests {
         assert!(doc.remove_selected());
         assert_eq!(doc.furnishing_ids(), vec![a]);
         assert_eq!(doc.selected_id(), -1);
+    }
+
+    #[test]
+    fn an_ai_set_lines_up_along_a_side_wall_not_the_room_centre() {
+        let mut doc = Document::new();
+        doc.set_rectangle(6.0, 5.0);
+        // Three pieces from one proposal, each carrying its slot in the set.
+        let ids: Vec<u32> = (0..3)
+            .map(|slot| doc.add_furnishing_aside("sheen-chair", 0.83, 0.69, 0.57, slot))
+            .collect();
+
+        let centre_z = 2.5; // half of the 5 m depth
+        let mut last_x = f32::NEG_INFINITY;
+        for &id in &ids {
+            let t = doc.furnishing_transform(id);
+            let (x, z) = (t[0], t[2]);
+            // Off to the side: seated against the near wall, nowhere near the room centre.
+            assert!(
+                z < 1.0 && (centre_z - z) > 1.0,
+                "a proposed piece should hug the side, got z = {z}"
+            );
+            // And walking down the row rather than stacking on the last one.
+            assert!(x > last_x, "pieces should step along the row, got x = {x}");
+            last_x = x;
+        }
     }
 
     #[test]
