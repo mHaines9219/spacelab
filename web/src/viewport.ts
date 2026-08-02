@@ -28,13 +28,23 @@ const WALL_TINTS = [0xf4f1ea, 0xd9dce0, 0xd6cec2, 0xb9c3b2, 0xc7ab9a];
  * low-sun moods raise it to keep the room readable rather than half-black, and Overcast
  * carries almost all its light there. `sun` is metres in world space — height above the
  * floor sets how long the shadows run.
- * Index 0 reproduces the fixed sun the scene carried before lighting was selectable.
+ *
+ * Every preset keeps the key light **off the default camera's azimuth**. The camera sits
+ * at +x/+z and the sun used to sit at +x/+z as well, within a few degrees of it, so every
+ * shadow fell directly away from the viewer and hid behind the object that cast it. The
+ * shadows were rendering correctly the whole time and simply could not be seen — flat,
+ * on-camera-flash lighting. Swinging the key ~90° round the room is what makes the moods
+ * legible.
+ *
+ * The room's two default walls sit on the -x and -z edges, so a *low* sun from that side
+ * is blocked by them and floods the floor with wall shadow. The lateral offsets below
+ * therefore go over the open +x / +z sides, and only the height varies the shadow length.
  */
 const LIGHTING = [
-  { color: 0xffffff, intensity: 3.4, sun: [3.5, 6, 4.5], env: 0.55, sky: 0x14161a },
-  { color: 0xffd9a8, intensity: 2.9, sun: [6.5, 2.6, 3.0], env: 0.7, sky: 0x1a1a1d },
-  { color: 0xff9d5c, intensity: 2.4, sun: [-5.5, 1.9, 3.4], env: 0.62, sky: 0x1d1518 },
-  { color: 0xdfe6ef, intensity: 0.9, sun: [2.0, 7.5, 2.5], env: 1.35, sky: 0x1c1f23 },
+  { color: 0xffffff, intensity: 3.4, sun: [5.0, 7.0, -1.5], env: 0.55, sky: 0x14161a },
+  { color: 0xffd9a8, intensity: 2.9, sun: [-1.5, 4.0, 5.0], env: 0.7, sky: 0x1a1a1d },
+  { color: 0xff9d5c, intensity: 2.4, sun: [6.0, 2.8, 1.0], env: 0.62, sky: 0x1d1518 },
+  { color: 0xdfe6ef, intensity: 0.9, sun: [2.0, 8.0, 1.0], env: 1.35, sky: 0x1c1f23 },
 ] as const;
 
 const textureLoader = new THREE.TextureLoader();
@@ -238,7 +248,6 @@ export async function createViewport(
     (scene.background as THREE.Color).setHex(preset.sky);
   };
   applyLighting(doc.lighting());
-
   // Floor and walls each take a swappable finish, and stay two meshes so each carries
   // its own material. The floor swaps between pre-built materials (one texture set per
   // finish); the walls share a single material and swap only its tint, which keeps the
@@ -741,6 +750,10 @@ export async function createViewport(
     doc.delete_wall(selectedWall);
     syncRoomGeometry();
     rebuildWallPicks();
+    // The document cascades a wall's openings away with it, so the meshes for those
+    // openings have to go too — without this their pick box, outline and glass pane
+    // stay floating where the wall used to be.
+    rebuildOpenings();
     selectWall(null);
   };
 
@@ -1072,6 +1085,7 @@ export async function createViewport(
     deleteWall: (id) => {
       doc.delete_wall(id);
       syncRoomGeometry();
+      rebuildOpenings();
     },
     wallSegments: () => Array.from(doc.wall_segments()),
     wallIds: () => Array.from(doc.wall_ids()),

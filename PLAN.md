@@ -52,8 +52,18 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
   `lighting` / `set_lighting`; the picker grew a third row.
 - **The default is now the single source of the opening lighting.** The sun position and
   `environmentIntensity` used to be literals at construction; they are applied from the
-  preset instead, and index 0 reproduces the previous fixed sun exactly — so **an
-  existing room opens looking identical**.
+  preset instead.
+- **The room was lighting itself like an on-camera flash, and that is fixed here.** The
+  default sun sat at `(3.5, 6, 4.5)` and the default camera sits at `(5.4, 3.4, 5.2)` —
+  the same azimuth within a few degrees. Every shadow therefore fell directly away from
+  the viewer and hid behind the object that cast it, so the room rendered its shadows
+  correctly and showed you none of them. Investigated as "shadows are broken": the
+  shadow map allocates, the sun is in the scene and contributes, casters and receivers
+  are flagged, and a minimal scene through the same renderer casts fine — moving the sun
+  to the far side of the room produces a correct shadow immediately. **Every preset now
+  keeps the key light off the camera's azimuth**, which is what makes the moods legible.
+  Consequently index 0 is *not* the old sun position; the default room now reads with
+  depth rather than flat.
 - Low-sun moods raise the environment fill rather than leaving the room half-black, and
   `Overcast` carries almost all its light there.
 - Verified: **94 Rust tests + clippy clean** (scene-level default/set and
@@ -65,19 +75,24 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 
 **Remains**
 
-- **Furniture casts no shadow on the floor, and this predates the change.** The renderer
-  is configured for it — `shadowMap.enabled`, `sun.castShadow`, five casters in the
-  scene, `floor.receiveShadow` — and dropping `environmentIntensity` to 0 does not
-  reveal one, so it is not fill washing it out. The M0 gate recorded shadows as passing,
-  so this drifted at some point since. **It blunts every preset here**, because mood in a
-  room is mostly shadow. Owned by the M3 lane, next after this.
-- **The four moods read as subtler than they should** for the same reason. The tints and
-  angles are hand-picked rather than derived from a sun position, and they were tuned on
-  one machine at one room size.
+- **The moods are hand-picked, not derived.** Sun colour, angle and fill are tuned by eye
+  against one room size on one machine, not computed from a time of day. Two of the four
+  differ more in tint than in shadow direction.
+- **The lateral offsets are constrained by the default room's two walls.** Because those
+  walls sit on the -x/-z edges, a low sun from that side is blocked and floods the floor
+  with wall shadow, so every preset lights from over the open +x/+z sides. A room whose
+  walls were added elsewhere — or a traced polygon — has no such guarantee, and nothing
+  adapts the key light to the actual footprint.
 - **No time-of-day slider and no per-light control** — four fixed presets, deliberately.
   Artificial/interior lights (lamps as light sources rather than props) are absent.
 - **Camera framing — the last M3 item — is untouched.** It still only reframes to the
-  footprint on geometry change.
+  footprint on geometry change. Worth noting the two are coupled: the key light is placed
+  relative to where the camera *starts*, so once the user orbits, the flattering angle is
+  no longer guaranteed. Nothing re-keys the light to the current view.
+- **Deleting a wall used to leave its doors and windows floating in mid-air.** Fixed here
+  in passing (`deleteSelectedWall` and the `deleteWall` probe both re-run
+  `rebuildOpenings`) since it lives in the same file — the document already cascaded the
+  openings away, only the renderer had not heard. Found by the browser suite.
 - The verification screenshots were reviewed by eye; nothing pins the moods against
   reference images, so a preset could drift without a test noticing.
 - Carried: per-wall material still waits on a `shell_mesh` split; walkway clearance,
