@@ -28,7 +28,13 @@ impl Footprint {
     /// World directions of the rectangle's own two axes: local `+X` first, then local
     /// `+Z`. Same yaw-about-up convention `resolve_placement` emits, so a wall-snapped
     /// item's footprint lines up with the wall it was seated against.
-    fn axes(&self) -> (Vec2, Vec2) {
+    ///
+    /// `pub(crate)` so [`crate::swing`] shares this one definition rather than
+    /// re-deriving it. A yaw convention with two encodings is a bug waiting for someone
+    /// to change one of them — and a wall footprint built on the wrong one is exactly
+    /// what put walls in open floor during the door-swing work: every *negative*
+    /// assertion still passed, because a misplaced wall obstructs nothing.
+    pub(crate) fn axes(&self) -> (Vec2, Vec2) {
         let (sin, cos) = self.yaw.sin_cos();
         (Vec2::new(cos, -sin), Vec2::new(sin, cos))
     }
