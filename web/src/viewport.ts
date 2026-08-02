@@ -458,6 +458,54 @@ export async function createViewport(
 
   const urlOf = (entry: CatalogEntry) => `/assets/${entry.blob}`;
 
+  /**
+   * Catalog entries by asset id, fetched once.
+   *
+   * `placed` is the id→entry map the renderer reads, and it dies with the page. A
+   * restored document knows each furnishing's *asset id* but not what that asset looks
+   * like, so rebuilding meshes means resolving ids back through the catalog. Only the
+   * restore path needs this; ordinary placement already has the entry in hand.
+   */
+  let catalogIndex: Map<string, CatalogEntry> | null = null;
+  const catalogById = async () => {
+    if (!catalogIndex) {
+      const entries: CatalogEntry[] = await fetch("/assets/catalog.json").then((r) =>
+        r.json(),
+      );
+      catalogIndex = new Map(entries.map((e) => [e.asset_id, e]));
+    }
+    return catalogIndex;
+  };
+
+  /**
+   * Rebuild every furnishing mesh from a freshly restored document.
+   *
+   * Covers stashed items as well as placed ones — `furnishing_asset_id` resolves across
+   * the whole list, so the bullpen comes back knowing what its cards are instead of a
+   * row of unidentifiable thumbnails.
+   *
+   * Templates are GLB loads, so this is async: a restore is not complete when
+   * `load_json` returns, and the caller must await it before reporting success.
+   */
+  const restoreFurnishings = async () => {
+    const byId = await catalogById();
+    const ids = [...doc.furnishing_ids(), ...doc.stashed_ids()];
+    const needed = new Set<string>();
+    for (const id of ids) {
+      const entry = byId.get(doc.furnishing_asset_id(id));
+      // An asset the catalog no longer carries is skipped rather than fatal: one
+      // retired model should cost that item, not the whole room.
+      if (!entry) continue;
+      placed.set(id, entry);
+      needed.add(urlOf(entry));
+    }
+    // Warm every template first so `reconcileFurnishings` finds them all synchronously
+    // and the room appears at once rather than item by item.
+    await Promise.all([...needed].map((url) => getTemplate(url)));
+    reconcileFurnishings();
+    refreshBullpen();
+  };
+
   async function getTemplate(url: string): Promise<THREE.Group> {
     const cached = templates.get(url);
     if (cached) return cached;
@@ -1137,30 +1185,7 @@ export async function createViewport(
     setOpeningDimension,
     undo: () => {
       if (!doc.undo()) return null;
-      // Undo can touch anything, so re-sync the whole scene from the restored document.
-      syncRoomGeometry();
-      rebuildWallPicks();
-      selectWall(null);
-      if (addMode) setAddMode(false);
-      if (openingMode) setAddOpening(null);
-      floorMesh.material = floorMaterials[doc.floor_material()];
-      wallMaterial.color.setHex(WALL_TINTS[doc.wall_material()]);
-      applyLighting(doc.lighting());
-      reconcileFurnishings();
-      // Undo can add, remove or move any opening; `syncRoomGeometry` above already
-      // rebuilt the proxies from the restored document, so only the selection is left.
-      selectOpening(null);
-      refreshBullpen();
-      selectFurnishing(null);
-      const hasRoom = doc.has_room();
-      const [minX, minZ, maxX, maxZ] = doc.room_bounds();
-      return {
-        floorIndex: doc.floor_material(),
-        wallIndex: doc.wall_material(),
-        lightingIndex: doc.lighting(),
-        empty: !hasRoom,
-        room: hasRoom ? { widthM: maxX - minX, depthM: maxZ - minZ } : null,
-      };
+      return resyncAll();
     },
   };
 }
