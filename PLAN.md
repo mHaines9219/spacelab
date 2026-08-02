@@ -47,6 +47,51 @@ yet satisfied, and the rows say so rather than rounding up.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### CI: the tree is `rustfmt`-clean, and a gate keeps it that way · 2026-08-02
+
+**Accomplished**
+
+- **The workspace has never been `rustfmt`-clean, and now is.** `cargo fmt --all --check`
+  reported diffs across all three crates from the first day anyone looked — **18 hunks when
+  the debt was first named this morning, 30 by the time the window to pay it opened.** It
+  grew with every PR it waited behind, which is the whole argument for paying it now rather
+  than someday. Six files, all cosmetic: rustfmt rewrapping long `assert!` and `out.quad`
+  argument lists, sorting one `use`, stripping one trailing space.
+- **`cargo fmt --check` is now a CI job, so it cannot drift back.** Added as its own job
+  rather than a step inside `cargo test + clippy`, for the two reasons `vitest` is not a
+  step inside the browser suite: formatting needs no build, so it answers in seconds
+  instead of waiting behind test and clippy; and it reports separately, so *"your
+  formatting is off"* never reads as *"your tests failed"*.
+- **The reformat and the gate are in one PR deliberately, and this is the load-bearing
+  part.** Neither half is correct alone. A check bolted onto an unformatted tree is red on
+  arrival and gets ignored — which teaches people to skip a red job, the failure mode the
+  team spent the afternoon writing a guide about. A reformat without the check drifts back
+  within a week. Because the halves are only right together, this change crosses a lane
+  boundary into `ci.yml`; the boundary yielding to a correctness span, with the file's
+  owner reviewing, is what keeps the lane meaningful rather than bureaucratic.
+- Verified: **114 tests green and clippy clean before and after**, identical counts — the
+  check that the reformat is genuinely cosmetic rather than assumed to be. Workflow YAML
+  parses; six jobs with distinct names.
+
+**Remains**
+
+- **The sixth context is not yet required.** `cargo fmt` runs advisory until the protection
+  list gains it — one API call, owned separately, and the same gap that left `PR targets
+  main` advisory for hours after it landed. Until then a red format job stops nothing.
+  **More jobs running is not the same as more gates**, and the drift one-liner in
+  `GUIDES/VERIFYING_NEGATIVE_RESULTS.md` prints the difference.
+- **`rustfmt.toml` does not exist**, so this pins the tree to whatever defaults the
+  toolchain ships. A `rustfmt` release that changes a default reformats the workspace and
+  turns the gate red on an untouched tree. Cheap to fix with an explicit config and a
+  pinned `edition`; not done here, because guessing at style preferences nobody has
+  expressed would be a worse change than the drift it prevents.
+- Carried: `M2` keeps walkway clearance, door-swing arcs, furniture-vs-wall and floor
+  containment; `M3` owes camera framing, which is why that row is not ✅; `M5` is the
+  save/load slice only, with share links and glTF/USDZ export deferred; the browser suite
+  is ~12 minutes every PR waits behind (measured on #26, not inherited); no migration path
+  exists for the save format, only a version check; the draw tool still accepts a
+  self-intersecting polygon and tells the user nothing.
+
 ### M1 ✅ — every deliverable its own bullet names is on `main` · 2026-08-02
 
 **Accomplished**
