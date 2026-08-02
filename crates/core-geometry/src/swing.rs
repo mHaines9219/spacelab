@@ -180,9 +180,8 @@ pub fn sector_hits(sector: &Sector, rect: &Footprint) -> bool {
 }
 
 fn rect_corners(rect: &Footprint) -> [Vec2; 4] {
-    let (sin, cos) = rect.yaw.sin_cos();
-    let u = Vec2::new(cos, -sin) * rect.half.x;
-    let v = Vec2::new(sin, cos) * rect.half.y;
+    let (ux, vy) = rect.axes();
+    let (u, v) = (ux * rect.half.x, vy * rect.half.y);
     [
         rect.centre - u - v,
         rect.centre + u - v,
@@ -192,10 +191,10 @@ fn rect_corners(rect: &Footprint) -> [Vec2; 4] {
 }
 
 fn rect_contains(rect: &Footprint, p: Vec2) -> bool {
-    let (sin, cos) = rect.yaw.sin_cos();
+    let (u, v) = rect.axes();
     let rel = p - rect.centre;
-    let along = rel.dot(Vec2::new(cos, -sin)).abs();
-    let across = rel.dot(Vec2::new(sin, cos)).abs();
+    let along = rel.dot(u).abs();
+    let across = rel.dot(v).abs();
     along <= rect.half.x + TOUCH_EPS && across <= rect.half.y + TOUCH_EPS
 }
 

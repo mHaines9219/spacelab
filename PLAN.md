@@ -74,6 +74,13 @@ yet satisfied, and the rows say so rather than rounding up.
   its keep immediately: it failed first time and the cause was a real bug, a wall
   footprint built with the wrong yaw convention that rotated every wall rectangle a
   quarter turn. Walls sat in open floor and no door could foul one.
+- **One definition of the yaw convention, not three.** `swing` reuses `clearance`'s
+  `Footprint`, but `axes()` was private, so the basis was re-derived by hand at two more
+  sites. Review caught it: the repo would have carried three independent encodings of the
+  convention whose mismatch had just caused the wall bug above, and changing one would
+  have left the others quietly wrong. `axes()` is now `pub(crate)` and both sites call
+  it — the 126 tests passing unchanged is the equivalence proof, since the two bases were
+  already byte-identical.
 - Verified: **126 tests green + clippy clean + `rustfmt` clean** (11 new in `swing.rs`,
   1 at the binding driving the real `add_furnishing`/`drag` path). WASM **105,744 B
   gzipped**, up 1,778 B from `main`'s 103,966 B (`gzip -n -9`, fresh build) — 42% of the
