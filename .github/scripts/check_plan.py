@@ -11,6 +11,10 @@ catch the mechanical ways the log gets damaged by concurrent merges resolving th
 block against a moving base.
 
 Usage: check_plan.py <base-ref> [--post-merge]
+
+It reads `git show HEAD:PLAN.md`, **not the working tree**. Run it on uncommitted edits and
+it silently grades the previous commit and passes — a true answer about the wrong tree.
+Commit first, then run it.
 """
 
 import re
@@ -56,10 +60,11 @@ def fingerprint(body: list[str]) -> str:
 def main() -> int:
     base = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
     # `--post-merge` runs this against `main` after something has landed, comparing the
-    # previous tip to the new one. It cannot prevent a loss — branch protection is
-    # unavailable on this plan, so a red check cannot block a merge — but it turns a
-    # silent disappearance into a red mark within a minute. The "must add an entry" rule
-    # is skipped there: a revert or a docs-only merge would trip it for no reason.
+    # previous tip to the new one. It was the only line of defence back when the repo was
+    # private and branch protection was unavailable; `PLAN.md log` is a required context
+    # now, so the PR-side run does the blocking and this one is the backstop for anything
+    # that reaches `main` another way. The "must add an entry" rule is skipped there: a
+    # revert or a docs-only merge would trip it for no reason.
     post_merge = "--post-merge" in sys.argv
     problems: list[str] = []
 
@@ -67,20 +72,36 @@ def main() -> int:
     head = entries(sh("git", "show", f"HEAD:{PLAN}"))
     old = entries(sh("git", "show", f"{base}:{PLAN}"))
 
-    # 1. Product work has to leave a trace in the log.
+    # 1. Nothing already written may disappear. This is the one that just failed four
+    #    times: a stale base wins the merge and silently drops a teammate's entry.
+    #
+    #    A heading that changed while its body stayed put is a *rename*, not a loss, and
+    #    treating the two alike made every heading permanent — including a wrong one. That
+    #    is a real cost: this check exists to keep the log honest, so it must not be the
+    #    reason a dishonest heading has to stay. Renames are allowed and printed, never
+    #    silent. A rename that also rewrites the opening line still reads as a
+    #    disappearance, which is the safe direction to fail in.
+    by_body = {fp: h for h, b in head.items() if (fp := fingerprint(b))}
+    renamed: list[tuple[str, str]] = []
+    for lost in [h for h in old if h not in head]:
+        fp = fingerprint(old[lost])
+        if fp and fp in by_body:
+            renamed.append((lost, by_body[fp]))
+            continue
+        problems.append(f"PLAN.md entry disappeared relative to {base}: '### {lost}'")
+
+    # 2. Product work has to leave a trace in the log. A renamed heading is not a new
+    #    entry and must not satisfy this — otherwise retitling something old would excuse
+    #    a PR from recording what it did.
     touches_product = any(f.startswith(PRODUCT_PATHS) for f in changed)
-    added = [h for h in head if h not in old]
+    renames = {after for _, after in renamed}
+    added = [h for h in head if h not in old and h not in renames]
     if touches_product and not added and not post_merge:
         problems.append(
             "This PR changes product code but adds no new '### ' entry to PLAN.md.\n"
             "    CLAUDE.md: 'Add a dated entry at the top of the log: what the PR\n"
             "    accomplished, and what remains.'"
         )
-
-    # 2. Nothing already written may disappear. This is the one that just failed four
-    #    times: a stale base wins the merge and silently drops a teammate's entry.
-    for lost in [h for h in old if h not in head]:
-        problems.append(f"PLAN.md entry disappeared relative to {base}: '### {lost}'")
 
     # 3. Headings must be unique, or two entries claim the same work.
     for heading, n in Counter(HEADING.match(l).group(1).strip()
@@ -116,6 +137,8 @@ def main() -> int:
             print(f"  - {p}")
         return 1
 
+    for before, after in renamed:
+        print(f"PLAN.md entry renamed (body unchanged): '### {before}' → '### {after}'")
     print(f"PLAN.md log OK — {len(head)} entries, {len(added)} added in this PR")
     return 0
 
