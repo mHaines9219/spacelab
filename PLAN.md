@@ -39,6 +39,49 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### CI: a PR must target `main`, and the log guard now runs after a merge too · 2026-08-02
+
+**Accomplished**
+
+- **An entry was lost again — and this time the guard caught it and was merged past.** On
+  #16 the `PLAN.md log` job went red at **14:06:31** with exactly the right message
+  (`entry disappeared relative to c249759: '### A committed browser suite, CI, and a guard
+  on this log'`), and #16 merged at **14:06:27** — four seconds earlier. The check did not
+  fail to work; the merge did not wait for it. That entry is restored here **verbatim from
+  `c249759`**, the commit that wrote it.
+- **`main` cannot require passing checks on this plan.** Branch protection returns
+  `403 Upgrade to GitHub Pro or make this repository public`, so every gate in this repo is
+  advisory by construction. Worth stating once, plainly, rather than rediscovering it per
+  incident.
+- **The log guard now also runs on push to `main`**, comparing the previous tip to the new
+  one. It cannot prevent a loss it never got to vote on, but it turns a silent
+  disappearance into a red mark on `main` within a minute. Verified against the real event:
+  comparing `c249759` to `ff6112d` reports the browser-suite entry as lost.
+- **New `PR targets main` job.** #18 merged into `ci-browser-suite`, reported MERGED, and
+  never reached `main` — taking the floating-door fix with it. A base branch that can be
+  consumed while a PR still points at it is the root cause, so a PR whose base is not
+  `main` now fails with an explanation.
+- **Deliberately *not* the `is-ancestor` check that was suggested.** This repo
+  squash-merges, so a PR head is never an ancestor of `main` even when it lands perfectly.
+  Measured rather than assumed: #17's head `88cb777` is not an ancestor of `main`, and all
+  of its content is on `main`. That check would fail 100% of correctly-merged PRs and
+  train everyone to ignore a red job.
+
+**Remains**
+
+- **Every check here is advisory.** Without branch protection, the only thing between a red
+  guard and a bad merge is whoever clicks the button. Making the repo public or upgrading
+  the plan is the only real fix, and it is the owner's call.
+- **The post-merge guard reports, it does not repair.** A loss still needs a human to
+  restore the entry from the commit that wrote it.
+- **Nothing compares a merged PR's intended change against what `main` received.** That is
+  the code half of this failure and it stays uncovered; under squash-merge the comparison
+  is genuinely hard, because later PRs legitimately touch the same files.
+- Carried: `cargo fmt` still ungated and the tree still not `rustfmt`-clean — #19 and #20
+  are open across those files, so the window has not opened yet; the browser job is ~8
+  minutes on CI against ~27 seconds locally; concurrent local runs still contend; a
+  real-LiDAR RoomPlan round-trip is still owed.
+
 ### M1: resizing a room keeps the walls you drew · 2026-08-02
 
 **This clears the last item M1 was waiting on, and deliberately does not flip the flag.**
@@ -193,6 +236,76 @@ has to argue past.
   uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan real-scan
   validation owed; nothing persists yet (M5); fps on one machine; `cargo fmt` reports diffs
   across the three crates, owed as its own commit now the branches holding them have merged.
+### A committed browser suite, CI, and a guard on this log · 2026-08-01
+
+**Accomplished**
+
+- **The browser suite exists in the tree now.** `web/tests/`, run with `npm run test:e2e`.
+  Eighteen tests over `@playwright/test`: room creation and the floor's independence from
+  the walls, catalog placement, set-aside/re-import, rotation, doors and windows cutting a
+  wall, floor and wall finishes, and the clearance outlines. Every dev probe in
+  `viewport.ts` — `__crowdedIds`, `__outlines`, `__wallTris`, `__openingCount` and the rest
+  — was written for a suite that did not exist; **this is that suite.** Three separate
+  throwaway drivers were written and thrown away in one session before it landed.
+- **CI runs on every PR** (`.github/workflows/ci.yml`): `cargo test`, `clippy -D warnings`,
+  `tsc --noEmit`, and the browser suite, with the Playwright report kept as an artifact on
+  failure. Nothing re-ran on a PR before this.
+- **A structural guard on `PLAN.md`** (`.github/scripts/check_plan.py`), because four PRs
+  merged in one session and three-quarters of this log silently vanished — every PR green,
+  every merge reporting success. It checks that product changes add an entry, that no
+  existing entry disappears, that headings are unique, that new entries carry a
+  **Remains**, and — the one that matters — **that no two entries share a body**. A
+  heading-presence check cannot see a heading sitting above someone else's body text,
+  which is the exact damage that got past three reviewers. Both checks were validated
+  against the real damage: the disappearance check fires on `b1c7067` against `861d0dc`,
+  and the shared-body check fires on the first restoration attempt.
+- **The WASM build no longer sits inside the server-startup timeout.** `webServer` ran
+  `npm run dev`, which is `npm run wasm && vite` — so a release-mode wasm-pack build of
+  the whole workspace was being measured against a budget meant for booting a dev server.
+  On a loaded machine the build alone blew it, and the run died with
+  `Timed out waiting 240000ms from config.webServer`, which reads like a hang rather than
+  a slow compile. `webServer` now runs bare `vite` and `test:e2e` builds the WASM ahead of
+  Playwright, where a slow or failing build surfaces as a build error with compiler
+  output. CI already split these, so only the local path was affected.
+- **The suite found a bug on its first full run.** Deleting a wall leaves its door
+  floating in mid-air — Rust drops the opening from the document, but
+  `deleteSelectedWall` (`viewport.ts:709`) calls `syncRoomGeometry()` and
+  `rebuildWallPicks()` and never `reconcileOpenings()`, so the pick box, outline and glass
+  pane stay in the scene. Recorded as a `test.fail()` rather than a skip, so the suite is
+  green today and goes red the moment the fix lands without the note being retired.
+- Three environment traps are baked into the config rather than left to be rediscovered:
+  `reuseExistingServer: false` plus `--strictPort`, so a run can never silently test
+  another checkout's dev server; software-GL flags, without which headless WebGL never
+  initialises; and a narrow ignore-list for texture 404s, so CI stays off a third-party
+  CDN while the console guard still fails on real errors.
+
+**Remains**
+
+- **The floating-door leak is unfixed** — one `reconcileOpenings()` call, deliberately not
+  taken here because it lives in a file with two PRs open against it. Pinned by the
+  `test.fail()` above.
+- **`cargo fmt --check` is not in CI and the tree is not `rustfmt`-clean** — 18 hunks
+  across four files, nearly all pre-existing. Landing the sweep while three branches hold
+  those exact files is the one change guaranteed to conflict with all of them, so it is
+  sequenced after they merge: own commit, then the gate.
+- **The browser job takes ~8 minutes on CI against ~27 seconds locally.** Headless
+  Chromium has no GPU, so every frame goes through software GL (swiftshader). Workable at
+  18 tests; it will not stay workable indefinitely, and sharding is the lever when it
+  stops being.
+- **Concurrent suite runs on one machine still degrade badly**, even with the WASM build
+  moved out of the server timeout. Three agents running browser suites at load average
+  8.5 produced a 1.5-hour run with nine `webServer` timeouts and no assertion failures at
+  all. The build/boot split below removes the worst of it, but a shared machine remains a
+  hazard and the symptom still reads as a hang rather than as contention.
+- The suite is **one browser, one room shape**, and it does not drive the Draw flow, the
+  3D pointer-drag path, or camera framing. Wall ids `0`/`1` are assumed from
+  `build_room`'s index assignment, which the resize fix is about to change — those tests
+  should fail loudly rather than quietly retarget when it does.
+- Carried: walkway clearance, door-swing arcs, furniture-vs-wall and furniture-vs-opening
+  clearance; furniture casts no shadow on the floor; `front=+Z` unverified; thumbnails
+  uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; **a real-LiDAR RoomPlan
+  round-trip is still owed** (the synthetic-schema half is in `RESEARCH/`); fps on one
+  machine; resize still wipes hand-added walls and their openings.
 
 ### M3: lighting presets as document state · 2026-08-01
 

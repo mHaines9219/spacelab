@@ -10,7 +10,7 @@ These are structural checks only. They cannot tell whether an entry is *honest*;
 catch the mechanical ways the log gets damaged by concurrent merges resolving the same
 block against a moving base.
 
-Usage: check_plan.py <base-ref>
+Usage: check_plan.py <base-ref> [--post-merge]
 """
 
 import re
@@ -55,6 +55,12 @@ def fingerprint(body: list[str]) -> str:
 
 def main() -> int:
     base = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
+    # `--post-merge` runs this against `main` after something has landed, comparing the
+    # previous tip to the new one. It cannot prevent a loss — branch protection is
+    # unavailable on this plan, so a red check cannot block a merge — but it turns a
+    # silent disappearance into a red mark within a minute. The "must add an entry" rule
+    # is skipped there: a revert or a docs-only merge would trip it for no reason.
+    post_merge = "--post-merge" in sys.argv
     problems: list[str] = []
 
     changed = sh("git", "diff", "--name-only", f"{base}...HEAD").split()
@@ -64,7 +70,7 @@ def main() -> int:
     # 1. Product work has to leave a trace in the log.
     touches_product = any(f.startswith(PRODUCT_PATHS) for f in changed)
     added = [h for h in head if h not in old]
-    if touches_product and not added:
+    if touches_product and not added and not post_merge:
         problems.append(
             "This PR changes product code but adds no new '### ' entry to PLAN.md.\n"
             "    CLAUDE.md: 'Add a dated entry at the top of the log: what the PR\n"
