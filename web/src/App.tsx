@@ -42,6 +42,7 @@ export function App() {
   const [openingSel, setOpeningSel] = useState<OpeningSelection>(null);
   const [openingMode, setOpeningMode] = useState<"door" | "window" | null>(null);
   const [floor, setFloor] = useState(0);
+  const [wall, setWall] = useState(0);
   const [bullpen, setBullpen] = useState<BullpenItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +87,7 @@ export function App() {
         return;
       }
       setFloor(result.floorIndex);
+      setWall(result.wallIndex);
       setRoom((prev) =>
         prev && result.room
           ? { ...prev, widthM: result.room.widthM, depthM: result.room.depthM }
@@ -246,11 +248,16 @@ export function App() {
             onDiscard={(id) => handleRef.current?.discardStashed(id)}
           />
 
-          <FloorPicker
-            active={floor}
-            onPick={(i) => {
+          <FinishPicker
+            floor={floor}
+            wall={wall}
+            onPickFloor={(i) => {
               handleRef.current?.setFloorMaterial(i);
               setFloor(i);
+            }}
+            onPickWall={(i) => {
+              handleRef.current?.setWallMaterial(i);
+              setWall(i);
             }}
           />
         </>
@@ -550,31 +557,57 @@ function DimensionField({
   );
 }
 
+// Labels only — the finish each ordinal means lives in Rust (`FloorMaterial`,
+// `WallMaterial`), and the look it maps to lives in the viewport.
 const FLOORS = ["Light wood", "Dark wood", "Tile", "Concrete"] as const;
+const WALLS = ["Warm white", "Cool grey", "Greige", "Sage", "Clay"] as const;
 
-function FloorPicker({
+function FinishPicker({
+  floor,
+  wall,
+  onPickFloor,
+  onPickWall,
+}: {
+  floor: number;
+  wall: number;
+  onPickFloor: (index: number) => void;
+  onPickWall: (index: number) => void;
+}) {
+  return (
+    <div className="floors">
+      <SwatchRow label="floor" options={FLOORS} active={floor} onPick={onPickFloor} />
+      <SwatchRow label="walls" options={WALLS} active={wall} onPick={onPickWall} />
+    </div>
+  );
+}
+
+function SwatchRow({
+  label,
+  options,
   active,
   onPick,
 }: {
+  label: string;
+  options: readonly string[];
   active: number;
   onPick: (index: number) => void;
 }) {
   return (
-    <div className="floors">
-      <strong>floor</strong>
+    <>
+      <strong>{label}</strong>
       <div className="swatches">
-        {FLOORS.map((label, i) => (
+        {options.map((option, i) => (
           <button
-            key={label}
+            key={option}
             type="button"
             className={i === active ? "swatch active" : "swatch"}
             onClick={() => onPick(i)}
           >
-            {label}
+            {option}
           </button>
         ))}
       </div>
-    </div>
+    </>
   );
 }
 

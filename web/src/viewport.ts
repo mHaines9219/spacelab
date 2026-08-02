@@ -13,6 +13,14 @@ const FLOOR_DIRS = ["wood-light", "wood-dark", "tile", "concrete"] as const;
 const FLOOR_TILE_M = [1.0, 1.0, 1.2, 2.5];
 const WALL_DIR = "drywall";
 const WALL_TILE_M = 2.5;
+/**
+ * Paint tints for the wall finishes, indexed by Rust's `WallMaterial` ordinal. Unlike
+ * the floor — where each finish is a different texture set — every wall finish shares
+ * the one matte plaster set and differs only in colour, so this is a tint list rather
+ * than a directory list, and the walls keep reading as drywall rather than flat paint.
+ * Index 0 is the off-white the walls carried before finishes were selectable.
+ */
+const WALL_TINTS = [0xf4f1ea, 0xd9dce0, 0xd6cec2, 0xb9c3b2, 0xc7ab9a];
 
 const textureLoader = new THREE.TextureLoader();
 
@@ -111,6 +119,8 @@ export type ViewportHandle = {
   resetScale: () => void;
   /** Choose the floor finish by index (matches Rust's FloorMaterial ordinal). */
   setFloorMaterial: (index: number) => void;
+  /** Choose the wall paint finish by index (matches Rust's WallMaterial ordinal). */
+  setWallMaterial: (index: number) => void;
   /** Replace the room with an axis-aligned rectangle (metres). */
   setRectangle: (widthM: number, depthM: number) => void;
   /** Replace the room with a closed polygon, `[x0, z0, x1, z1, …]` in metres. */
@@ -133,13 +143,15 @@ export type ViewportHandle = {
   setOpeningDimension: (axis: number, inches: number) => void;
   /**
    * Undo the last action, re-syncing the whole scene. Returns derived UI state to
-   * refresh (floor finish, room footprint), or null if there was nothing to undo.
+   * refresh (floor and wall finishes, room footprint), or null if there was nothing
+   * to undo.
    */
   undo: () => UndoResult | null;
 };
 
 export type UndoResult = {
   floorIndex: number;
+  wallIndex: number;
   empty: boolean;
   room: { widthM: number; depthM: number } | null;
 };
@@ -197,8 +209,10 @@ export async function createViewport(
   sun.shadow.camera.updateProjectionMatrix();
   scene.add(sun);
 
-  // Floor takes a swappable finish; walls take a fixed matte drywall look. Two
-  // meshes so each carries its own material.
+  // Floor and walls each take a swappable finish, and stay two meshes so each carries
+  // its own material. The floor swaps between pre-built materials (one texture set per
+  // finish); the walls share a single material and swap only its tint, which keeps the
+  // plaster maps to one set of texture fetches instead of one per colour.
   const floorMaterials = FLOOR_DIRS.map((dir, i) =>
     pbrMaterial(dir, FLOOR_TILE_M[i]),
   );
@@ -214,6 +228,10 @@ export async function createViewport(
   floorMesh.receiveShadow = true;
   scene.add(floorMesh);
 
+  const wallMaterial = pbrMaterial(WALL_DIR, WALL_TILE_M, {
+    color: new THREE.Color(WALL_TINTS[doc.wall_material()]),
+    normalScale: new THREE.Vector2(0.35, 0.35),
+  });
   const wallMesh = new THREE.Mesh(
     meshGeometry(
       doc.wall_positions(),
@@ -221,10 +239,7 @@ export async function createViewport(
       doc.wall_uvs(),
       doc.wall_indices(),
     ),
-    pbrMaterial(WALL_DIR, WALL_TILE_M, {
-      color: new THREE.Color(0xf4f1ea),
-      normalScale: new THREE.Vector2(0.35, 0.35),
-    }),
+    wallMaterial,
   );
   wallMesh.castShadow = true;
   wallMesh.receiveShadow = true;
@@ -933,6 +948,10 @@ export async function createViewport(
     floorMesh.material = floorMaterials[doc.set_floor_material(index)];
   };
 
+  const setWallMaterial = (index: number) => {
+    wallMaterial.color.setHex(WALL_TINTS[doc.set_wall_material(index)]);
+  };
+
   return {
     dispose: () => {
       renderer.setAnimationLoop(null);
@@ -949,6 +968,7 @@ export async function createViewport(
     setDimension,
     resetScale,
     setFloorMaterial,
+    setWallMaterial,
     setRectangle: (widthM, depthM) => {
       doc.set_rectangle(widthM, depthM);
       showRoom();
@@ -987,6 +1007,7 @@ export async function createViewport(
       if (addMode) setAddMode(false);
       if (openingMode) setAddOpening(null);
       floorMesh.material = floorMaterials[doc.floor_material()];
+      wallMaterial.color.setHex(WALL_TINTS[doc.wall_material()]);
       reconcileFurnishings();
       reconcileOpenings();
       refreshBullpen();
@@ -995,6 +1016,7 @@ export async function createViewport(
       const [minX, minZ, maxX, maxZ] = doc.room_bounds();
       return {
         floorIndex: doc.floor_material(),
+        wallIndex: doc.wall_material(),
         empty: !hasRoom,
         room: hasRoom ? { widthM: maxX - minX, depthM: maxZ - minZ } : null,
       };
