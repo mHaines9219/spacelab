@@ -47,6 +47,98 @@ yet satisfied, and the rows say so rather than rounding up.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### M2/M3: describe a look and the app furnishes it · 2026-08-02
+
+**Accomplished**
+
+- **AI style search lands as an assistive layer, not a new core.** A prompt box at the top
+  of the catalog — *"a cozy 70s bedroom"* — proposes a coherent furniture **set** plus
+  floor, wall and lighting finishes, shows its reasoning on a review card, and applies the
+  whole thing on one click. This is the first delivery against the plan's *"AI is
+  assistive, not core"* line, and it deliberately stops at *assistive*: the manual catalog
+  and finish pickers are untouched and remain the product.
+- **It obeys Rule #1 by being pure intent.** The resolver produces *which* catalog assets
+  to place and *which* finish ordinals to choose; nothing here touches the document or the
+  geometry. Applying a proposal routes every choice back through the existing Rust methods
+  a manual click already uses — `addFromCatalog`, `setFloorMaterial`, `setWallMaterial`,
+  `setLighting`. No new surface crosses the wasm boundary, and **no document or geometry
+  logic moved into JavaScript** — the style search sits exactly where `CatalogPanel`'s
+  keyword filter already sat, as browse/intent.
+- **Two resolvers behind one seam: an OpenRouter model, and a local heuristic under it.**
+  Both satisfy the `StyleResolver` type — `(prompt, catalog) => Promise<…>` — so the panel
+  and the apply path are identical whichever runs. When `VITE_OPENROUTER_API_KEY` is set the
+  prompt goes to an OpenRouter model (one OpenAI-shaped `fetch`); when it is not, the app is
+  the fully-offline local resolver — a curated lexicon of rooms and aesthetics scored against
+  the catalog's *own categories and tags*. The choice lives entirely in `resolver.ts`.
+- **The model's answer is never trusted.** Both resolvers funnel through one
+  `assembleProposal` join point: it drops asset_ids that are not in the catalog (a model can
+  hallucinate one; a save can retire one), clamps counts to 1–4 and finish ordinals to real
+  enum values, and caps the set at eight. **Any LLM failure — network down, non-200, junk
+  JSON, or an empty set after validation — falls back to the local resolver**, so the worst
+  case is offline-quality, never a broken feature. The proposal card shows which resolver
+  answered (the model slug, or `local`, or `local (offline fallback)`).
+- **It scores by category and tag, never by `asset_id`.** A growing catalog (the file-based
+  ingest model) makes the results better with no edits here — the resolver has no hardcoded
+  knowledge of which eleven pieces happen to exist today.
+- **Room type drives composition; aesthetic drives finishes.** *"bedroom"* asks for a bed,
+  two flanking nightstands, a lamp, a rug and a plant; *"70s"* votes dark-wood floor, clay
+  walls and evening light. Multiple matched styles blend their finish votes over a neutral
+  base, so there is always an answer — an unrecognised look degrades to a plain living room
+  rather than an empty proposal.
+- Verified: **21 `vitest` unit tests** — 12 on the local resolver (room detection,
+  era→finish mapping, the two-nightstand repeat, the eight-piece cap, off-template "…with a
+  bookcase" pulls, in-range finish ordinals) and 9 on the OpenRouter path *driven with an
+  injected `fetch`, no network*: it drops hallucinated ids, clamps counts and indices, tags
+  the source with the model, and falls back to local on a 500, a thrown request, and an empty
+  set. Plus **3 committed browser specs** proving the panel is wired to the document —
+  *"place this set"* raises the furnishing count by six **and** moves the finish picker's
+  active swatches, the card names its source (`local`, since CI has no key), and *dismiss*
+  leaves the room untouched. `tsc` clean against a freshly built binding; the 7 catalog/finish
+  specs still pass with the new panel section above them.
+
+**Remains**
+
+- **The OpenRouter key ships in the browser bundle.** `VITE_*` vars are build-time inlined,
+  so a built site exposes the key to anyone who loads it. That is acceptable for the local,
+  single-user tool this is today, and it is called out in `README.md`. A shared deployment
+  must move the one `fetch` behind a proxy — a change to `llmResolver.ts` alone, since the
+  call shape does not change.
+- **The LLM path is unexercised end to end.** CI has no key, so every automated run takes
+  the local resolver; the OpenRouter branch is covered only by unit tests with a *mocked*
+  `fetch`, which assert our handling of a response shape we assume rather than one a live
+  model returned. The first real call is a manual step, and the default model slug
+  (`openai/gpt-4o-mini`) is a guess that a user overrides with `VITE_OPENROUTER_MODEL`.
+- **The local heuristic is still a heuristic.** When it answers — no key, or a fallback — a
+  look it has no word for (*brutalist*, *cottagecore*) drops to the neutral base and a plain
+  living room with no signal that nothing matched. The model covers this when it runs; the
+  offline path does not.
+- **Finish tie-breaks are arbitrary-but-deterministic.** *"cozy 70s"* wants clay walls, but
+  cozy's greige and 70s's clay tie at equal votes and the resolver takes the lower ordinal
+  (greige). Not wrong, not obviously right — recorded because a user who typed "70s"
+  expecting clay gets greige and nothing explains why.
+- **Applying adds on top of the room; it does not replace it.** Two "design" runs stack, and
+  a set lands on whatever furniture was already there. There is no "clear the room first".
+- **No auto-layout — the set drops on the existing staggered 0.3 m point**, so six pieces
+  arrive overlapping and crowded-outlined and the user drags them apart. Arranging furniture
+  in space is its own feature and is deliberately *not* in this one; flagged rather than
+  absorbed, per scope discipline.
+- **Undo sees a set as its parts.** Applying is six placements plus three finish changes, so
+  undoing an applied set is nine Cmd-Z presses, not one. No command grouping exists.
+- **The unit layer now covers three modules** — `persistence.ts`, the binding guard, and
+  `styleSearch.ts` — still short of the web surface, but the resolver was pure logic with no
+  browser dependency, which is exactly what `vitest` is for here.
+- **TypeScript still has no formatter** (carried). The three new/edited web files match the
+  surrounding style by hand; Rust is `rustfmt`-clean and TS is not, unchanged by this PR.
+- Carried forward, none of it closed here: `cargo fmt` is gated but invisible in the check
+  list (named `cargo test + clippy`); no `rustfmt.toml`; one autosave slot with no named
+  saves; `localStorage` origin-scoped and silently finite; a furnishing whose catalog entry
+  has vanished is skipped on restore without telling anyone; autosave polls every 400 ms;
+  no share links and no glTF/USDZ export; the browser suite is ~12 minutes every PR pays
+  (now plus two specs); no migration path, only a version check; the draw tool accepts a
+  self-intersecting polygon; no 2D plan view of an existing room; walkway clearance,
+  door-swing arcs and furniture-vs-wall still open in M2; **camera framing still open in
+  M3**, so that row cannot flip until it lands; a real-LiDAR RoomPlan round-trip still owed.
+
 ### CI: `rustfmt` applied and gated in the same merge · 2026-08-02
 
 **Accomplished**

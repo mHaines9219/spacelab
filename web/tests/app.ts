@@ -133,6 +133,29 @@ export async function resizeWidthFeet(page: Page, feet: number) {
 }
 
 /**
+ * Describe a look to the AI style search and wait for the proposal card. Drives the real
+ * input and button, not the resolver directly, so this exercises the whole panel path.
+ */
+export async function designWithAI(page: Page, prompt: string) {
+  await page.locator(".ai-prompt").fill(prompt);
+  await page.getByRole("button", { name: "design", exact: true }).click();
+  await page.locator(".ai-proposal").waitFor({ state: "visible" });
+}
+
+/**
+ * Apply the shown AI proposal and wait until the whole set has landed. Placement is
+ * sequential and async, so the count climbs one at a time — poll to the expected total
+ * rather than reading once.
+ */
+export async function placeAISet(page: Page, expectedTotal: number) {
+  const before = await probe(page, "__furnishingCount");
+  await page.getByRole("button", { name: "place this set" }).click();
+  await expect
+    .poll(() => probe(page, "__furnishingCount"))
+    .toBe(before + expectedTotal);
+}
+
+/**
  * Hide every floating overlay so a screenshot shows the 3D scene alone. Only affects
  * presentation — the scene and the probes are untouched.
  */
