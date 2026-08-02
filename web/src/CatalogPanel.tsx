@@ -75,7 +75,16 @@ export function CatalogPanel({
         onApplyStyle={onApplyStyle}
       />
       <div className="catalog-head">
-        <strong>furniture</strong>
+        <strong>
+          furniture{" "}
+          {entries.length > 0 && (
+            <span className="catalog-count">
+              {filtered.length === entries.length
+                ? entries.length
+                : `${filtered.length}/${entries.length}`}
+            </span>
+          )}
+        </strong>
         <input
           className="catalog-search"
           type="search"

@@ -47,6 +47,59 @@ yet satisfied, and the rows say so rather than rounding up.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### M2 (content) — a catalog pipeline built to scale to 500, and 11 → 41 to prove it · 2026-08-02
+
+**Accomplished**
+
+- **Tagging is no longer done blind — `npm run tag`.** The long pole in §5 was never
+  fetching geometry, it was normalise-and-tag, and two tags went in on faith: `front`
+  (written `+Z`, unverifiable from a thumbnail) and the size axis (keying the wrong one
+  silently back-computed a 2.1 m round table). A dev-only 3D preview (`web/tag.html` +
+  `src/tag/preview.ts`, served by a `apply:"serve"` Vite plugin `scripts/tag-server.mjs`)
+  applies the **exact** `normalize.mjs` transform live (orient → scale → recenter, kept in
+  lockstep) and draws the master on a 1 m grid with a **FRONT +Z** arrow. Rotate until the
+  real front aligns, read the derived W×D×H (with an out-of-range warning), Save back to
+  `tags.json`. What you see is what `ingest:build` emits.
+- **The catalog is no longer bounded by git — the 500-asset ceiling is gone.** Re-fetchable
+  masters aren't committed: a tags entry carries a `fetch` descriptor and is regenerated
+  into the gitignored `assets-src/_cache/` on demand (`scripts/fetch-master.mjs`, shared by
+  `ingest:build` and the tag server so a fetch happens once). Committed masters remain only
+  for irreplaceable inputs (an ArchSense export). Proof: **41 assets ship as 60 KB of
+  committed JSON** (`tags.json` + `catalog.json`); their 33 MB of masters sit in `_cache/`,
+  gitignored. At 500 that's ~¾ MB committed vs. ~½ GB that would otherwise be in history.
+- **Bulk scaffolding makes tagging tractable — `ingest:polyhaven -- --category furniture`.**
+  Poly Haven is the open CC0 warehouse §5 named (no Cloudflare, the wall Poly Pizza hit) and
+  is **real-world-scaled** (native-scale path, no `sizeMeters`). The scaffolder writes recipe
+  entries straight from `/assets` metadata — category, tags, per-category clearance/anchor,
+  `style:"photoreal"` — so adding hundreds is data, not hand-typing. Front can't be derived,
+  so entries land at yaw 0 and **directional pieces (seating/bed/storage) scaffold
+  `verified:false`** as an explicit queue; symmetric ones auto-verify. Landed **11 → 41**
+  (30 Poly Haven furniture across seating/table/storage/bed/decor).
+- **The build survives partial failure.** A transient `fetch failed` on one of the 30
+  aborted the whole run; now fetches retry with backoff and a bad asset is skipped and
+  reported, not fatal — required behaviour at 500.
+- **Verified.** `ingest:selftest` green; `tsc` clean; the app loads all 41 with thumbnails
+  and no console errors; Playwright confirmed a fetch-based asset (Chinese Sofa) renders in
+  the tagger via on-demand fetch, and the 20-item verify queue shows. Git weight confirmed
+  flat (no new `.glb` tracked; `_cache/` ignored).
+
+**Remains**
+
+- **31 of 41 are `verified:false`** — 20 directional Poly Haven pieces owe a front pass in
+  `npm run tag`, and the 11 seed assets still carry asserted `+Z`. The flag makes the
+  backlog explicit; the pass itself is human work not yet done.
+- **The 30 are the raw `--limit 30` scaffold, uncurated** — one (`chinese_commode`) measured
+  4.49 m wide (a genuinely oversized source model), and the batch skews vintage/Chinese.
+  A real push should curate for coherence (the `style` tag helps) and set a **poly/size
+  budget** (Poly Haven pieces run 2k–40k tris).
+- **500 needs more than the wired sources** — Poly Haven interior ≈ 250–300, Kenney kit ≈ 50;
+  Quaternius (~100+) is **not yet wired**, and ArchSense is still format-unconfirmed.
+- **`npm run tag` and the ingest scripts have no automated test** — exercised by hand and the
+  Playwright smoke runs; no e2e guards them.
+- **Kenney/Quaternius/Khronos masters are still committed** — only Poly Haven uses the
+  re-fetch path so far; the others could move to `fetch` descriptors too (Kenney needs the
+  kit zip, which isn't re-downloadable by URL).
+
 ### An AI-suggested set lands in a row off to the side, not a heap in the middle · 2026-08-02
 
 **Accomplished**
@@ -1716,9 +1769,13 @@ React + TypeScript + Vite. A 2D floorplan editor (SVG or canvas2d) and a 3D view
 
 **Sourcing decision — curated files, not a runtime warehouse and not a warehouse API.** A live in-app "3D warehouse" (Sketchfab, Trimble, Fab) is the wrong shape: warehouses ship *geometry*, but the constraint system needs the metadata above (anchor, real dims, front vector, clearance) that **none of them provide** — so a warehouse only accelerates *sourcing*, it never removes the normalize+tag workstream, which is the long pole. That insight survived a prototype: we built a full ingest against the Poly Pizza API and it worked, but the API needed reverse-engineering and its GLB CDN sits behind a Cloudflare browser challenge (a headless browser just to download). The catalog is small and curated ("not that many"), so the sourcing model is now **operator-supplied master files** — hand-picked CC0 assets now, and supplied assets (e.g. ArchSense exports) going forward. Same benefit as mirror-and-normalize, none of the warehouse coupling.
 
-> **Pipeline (built):** file-based and source-agnostic (`web/scripts/`). Drop a master in `assets-src/` (committed — irreplaceable inputs), describe provenance + geometry tags in `tags.json`, run `npm run ingest:build` → normalise (orient front→+Z, scale to real dims *or* keep native scale, recenter origin to base-centre, meshopt-compress) → `catalog.json`. The normaliser's base-centre recenter also fixes the long-standing 8 mm chair-origin gap. Seeded with 5 CC0 low-poly furniture pieces (Quaternius/CreativeTrio).
+> **Pipeline (built):** source-agnostic (`web/scripts/`), and **built to scale to 500+**. `tags.json` is the committed source-of-truth per asset; `npm run ingest:build` resolves each master, normalises it (orient front→+Z, scale to real dims *or* keep native scale, recenter origin to base-centre, meshopt-compress), and writes `catalog.json`. The normaliser's base-centre recenter also fixes the long-standing 8 mm chair-origin gap. **Tag with `npm run tag`** — a 3D preview that runs the same transform live so `front` and the size axis are *verified* against the geometry, not asserted (see the 2026-08-02 log).
 >
-> **Storage shape:** normalised GLBs live in `models/` (gitignored, regenerated from masters); `catalog.json` is the committed metadata index (`asset_id, source, license, attribution, category, dims_m, anchor, front, clearance_m, tags, blob`). **At this scale `catalog.json` IS the database** — a real DB (SQLite → Postgres) is deferred until the catalog outgrows a file: hundreds of assets, user uploads, or server-side search. Then the object-store + relational-index split applies. **Objaverse-XL** (10M+ open GLB) remains a later ML lever for auto-orient/auto-tag at scale — a research direction, not an MVP catalog.
+> **Masters: committed only when irreplaceable; re-fetched otherwise.** A tags entry either names a committed `file` in `assets-src/` (a supplied ArchSense export — the irreplaceable input) *or* carries a `fetch` descriptor (`{source, slug, res}`) and is regenerated on demand into the gitignored `assets-src/_cache/` (`scripts/fetch-master.mjs`). This is the same "regenerate, don't commit" model textures use — **so catalog size is not bounded by git weight** (500 masters ≈ ½ GB would otherwise land in history).
+>
+> **Bulk scaffolding keeps tagging tractable.** `npm run ingest:polyhaven -- --category furniture [--limit N]` writes recipe entries straight from Poly Haven's `/assets` metadata (category, tags, native scale, per-category clearance/anchor, `style:"photoreal"`), so adding hundreds is data, not hand-typing. Front can't be derived → entries land at yaw 0; **directional pieces (seating/bed/storage) scaffold `verified:false`** as an explicit work queue for `npm run tag`, while symmetric pieces (tables/lighting/decor) auto-verify. Other wired source: `npm run ingest:kenney` (OBJ kit → GLB). Sources to reach 500: Poly Haven ~250–300 interior-usable, Kenney Furniture Kit ~50, Quaternius packs ~100+ (to wire), then ArchSense.
+>
+> **Storage shape:** normalised GLBs live in `models/` (gitignored); masters in `_cache/` (gitignored); `catalog.json` is the committed metadata index (`asset_id, source, license, attribution, category, style, dims_m, anchor, front, verified, clearance_m, tags, blob`). **`catalog.json` still IS the database at 500** — ~200 KB, filtered client-side; a real DB (SQLite → Postgres) is deferred until uploads or server-side search, not asset count. **Objaverse-XL** (10M+ open GLB) remains a later ML lever for auto-orient/auto-tag at scale — a research direction, not an MVP catalog.
 
 ### 6. Cloud
 

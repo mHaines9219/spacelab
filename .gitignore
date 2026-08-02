@@ -9,6 +9,10 @@ web/src/wasm/
 web/public/assets/textures/
 web/public/assets/models/
 web/assets-src/_kenney/
+web/assets-src/_polyhaven/
+# Re-fetchable masters (Poly Haven etc.) — regenerated from tags.json `fetch` descriptors
+# by ingest, so the catalog isn't bounded by git weight. See scripts/fetch-master.mjs.
+web/assets-src/_cache/
 *.wasm
 .DS_Store
 .env

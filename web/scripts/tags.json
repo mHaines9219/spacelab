@@ -40,7 +40,8 @@
         "front": 0.45,
         "sides": 0,
         "back": 0
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "table-round-large",
@@ -65,7 +66,8 @@
         "front": 0.6,
         "sides": 0.6,
         "back": 0.6
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "nightstand",
@@ -90,7 +92,8 @@
         "front": 0.4,
         "sides": 0,
         "back": 0
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "floor-lamp",
@@ -114,7 +117,8 @@
         "front": 0,
         "sides": 0,
         "back": 0
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "cabinet",
@@ -138,7 +142,8 @@
         "front": 0.6,
         "sides": 0,
         "back": 0
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "armchair",
@@ -161,7 +166,8 @@
         "front": 0.4,
         "sides": 0,
         "back": 0
-      }
+      },
+      "style": "photoreal"
     },
     {
       "id": "kenney-bed",
@@ -185,7 +191,8 @@
         "front": 0,
         "sides": 0.3,
         "back": 0
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "kenney-chair",
@@ -209,7 +216,8 @@
         "front": 0.4,
         "sides": 0,
         "back": 0
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "kenney-bookcase",
@@ -233,7 +241,8 @@
         "front": 0.4,
         "sides": 0,
         "back": 0
-      }
+      },
+      "style": "lowpoly"
     },
     {
       "id": "kenney-rug",
@@ -253,7 +262,8 @@
         "floor",
         "decor"
       ],
-      "clearance_m": null
+      "clearance_m": null,
+      "style": "lowpoly"
     },
     {
       "id": "kenney-plant",
@@ -273,7 +283,1016 @@
         "greenery",
         "decor"
       ],
+      "clearance_m": null,
+      "style": "lowpoly"
+    },
+    {
+      "id": "ph-armchair-01",
+      "file": "ph-armchair-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "ArmChair_01",
+        "res": "1k"
+      },
+      "title": "Arm Chair 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/ArmChair_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "gothic",
+        "vintage",
+        "chair",
+        "furniture",
+        "victorian",
+        "couch"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-barbershopchair-01",
+      "file": "ph-barbershopchair-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "BarberShopChair_01",
+        "res": "1k"
+      },
+      "title": "Barber Shop Chair 01",
+      "source": "Poly Haven — Fernando Quinn (CC0)",
+      "source_url": "https://polyhaven.com/a/BarberShopChair_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "chair",
+        "vintage",
+        "wood",
+        "leather",
+        "fancy",
+        "upholstery"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-classicconsole-01",
+      "file": "ph-classicconsole-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "ClassicConsole_01",
+        "res": "1k"
+      },
+      "title": "Classic Console 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/ClassicConsole_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "wood",
+        "vintage",
+        "gothic",
+        "victorian",
+        "decorative"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-classicnightstand-01",
+      "file": "ph-classicnightstand-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "ClassicNightstand_01",
+        "res": "1k"
+      },
+      "title": "Classic Nightstand 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/ClassicNightstand_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "wood",
+        "vintage",
+        "gothic",
+        "victorian",
+        "decorative"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-coffeecart-01",
+      "file": "ph-coffeecart-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "CoffeeCart_01",
+        "res": "1k"
+      },
+      "title": "Coffee Cart 01",
+      "source": "Poly Haven — Joe Seabuhr (CC0)",
+      "source_url": "https://polyhaven.com/a/CoffeeCart_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "style": "photoreal",
+      "tags": [
+        "storage",
+        "table",
+        "metal",
+        "shelf",
+        "plastic",
+        "cart",
+        "coffee"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-coffeetable-01",
+      "file": "ph-coffeetable-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "CoffeeTable_01",
+        "res": "1k"
+      },
+      "title": "Coffee Table 01",
+      "source": "Poly Haven — Fernando Quinn (CC0)",
+      "source_url": "https://polyhaven.com/a/CoffeeTable_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "wood",
+        "vintage",
+        "painted",
+        "old",
+        "worn"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-gothicbed-01",
+      "file": "ph-gothicbed-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "GothicBed_01",
+        "res": "1k"
+      },
+      "title": "Gothic Bed 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/GothicBed_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "bed",
+      "style": "photoreal",
+      "tags": [
+        "bed",
+        "vintage",
+        "gothic",
+        "furniture",
+        "wood",
+        "decorative"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0,
+        "sides": 0.3,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-gothiccabinet-01",
+      "file": "ph-gothiccabinet-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "GothicCabinet_01",
+        "res": "1k"
+      },
+      "title": "Gothic Cabinet 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/GothicCabinet_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "style": "photoreal",
+      "tags": [
+        "storage",
+        "vintage",
+        "wood",
+        "gothic",
+        "furniture",
+        "table",
+        "shelf"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-gothiccommode-01",
+      "file": "ph-gothiccommode-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "GothicCommode_01",
+        "res": "1k"
+      },
+      "title": "Gothic Commode 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/GothicCommode_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "style": "photoreal",
+      "tags": [
+        "storage",
+        "vintage",
+        "wood",
+        "table",
+        "gothic",
+        "shelf",
+        "furniture"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-greenchair-01",
+      "file": "ph-greenchair-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "GreenChair_01",
+        "res": "1k"
+      },
+      "title": "Green Chair 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/GreenChair_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "vintage",
+        "wood",
+        "gothic",
+        "furniture",
+        "chair",
+        "fabric"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-ottoman-01",
+      "file": "ph-ottoman-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "Ottoman_01",
+        "res": "1k"
+      },
+      "title": "Ottoman 01",
+      "source": "Poly Haven — Caspian Fortune (CC0)",
+      "source_url": "https://polyhaven.com/a/Ottoman_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "furniture",
+        "leather",
+        "chair",
+        "fabric",
+        "ottoman",
+        "upholstery"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-rockingchair-01",
+      "file": "ph-rockingchair-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "Rockingchair_01",
+        "res": "1k"
+      },
+      "title": "Rockingchair 01",
+      "source": "Poly Haven — Jorge Camacho (CC0)",
+      "source_url": "https://polyhaven.com/a/Rockingchair_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "chair",
+        "vintage",
+        "prop",
+        "wood",
+        "furniture",
+        "rocking chair"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-schoolchair-01",
+      "file": "ph-schoolchair-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "SchoolChair_01",
+        "res": "1k"
+      },
+      "title": "School Chair 01",
+      "source": "Poly Haven — Ethan Place (CC0)",
+      "source_url": "https://polyhaven.com/a/SchoolChair_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "prop",
+        "furniture",
+        "metal",
+        "plastic",
+        "chair",
+        "school"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-schooldesk-01",
+      "file": "ph-schooldesk-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "SchoolDesk_01",
+        "res": "1k"
+      },
+      "title": "School Desk 01",
+      "source": "Poly Haven — Ethan Place (CC0)",
+      "source_url": "https://polyhaven.com/a/SchoolDesk_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "school",
+        "desk",
+        "wood",
+        "metal",
+        "classroom"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-shelf-01",
+      "file": "ph-shelf-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "Shelf_01",
+        "res": "1k"
+      },
+      "title": "Shelf 01",
+      "source": "Poly Haven — Gabriel Radić (CC0)",
+      "source_url": "https://polyhaven.com/a/Shelf_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "style": "photoreal",
+      "tags": [
+        "storage",
+        "wood",
+        "shelf",
+        "furniture",
+        "home",
+        "organization"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-sofa-01",
+      "file": "ph-sofa-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "Sofa_01",
+        "res": "1k"
+      },
+      "title": "Sofa 01",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/Sofa_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "wood",
+        "prop",
+        "furniture",
+        "vintage",
+        "gothic",
+        "chair"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-woodenchair-01",
+      "file": "ph-woodenchair-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "WoodenChair_01",
+        "res": "1k"
+      },
+      "title": "Wooden Chair 01",
+      "source": "Poly Haven — Jake Mobley (CC0)",
+      "source_url": "https://polyhaven.com/a/WoodenChair_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "wood",
+        "prop",
+        "vintage",
+        "furniture",
+        "chair",
+        "gothic"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-woodentable-01",
+      "file": "ph-woodentable-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "WoodenTable_01",
+        "res": "1k"
+      },
+      "title": "Wooden Table 01",
+      "source": "Poly Haven — Ethan Place (CC0)",
+      "source_url": "https://polyhaven.com/a/WoodenTable_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "vintage",
+        "wood",
+        "prop",
+        "school",
+        "desk"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-woodentable-02",
+      "file": "ph-woodentable-02.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "WoodenTable_02",
+        "res": "1k"
+      },
+      "title": "Wooden Table 02",
+      "source": "Poly Haven — Fran Calvente (CC0)",
+      "source_url": "https://polyhaven.com/a/WoodenTable_02",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "vintage",
+        "wood",
+        "prop",
+        "furniture",
+        "old"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-woodentable-03",
+      "file": "ph-woodentable-03.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "WoodenTable_03",
+        "res": "1k"
+      },
+      "title": "Wooden Table 03",
+      "source": "Poly Haven — Gabriel Radić (CC0)",
+      "source_url": "https://polyhaven.com/a/WoodenTable_03",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "style": "photoreal",
+      "tags": [
+        "storage",
+        "vintage",
+        "wood",
+        "prop",
+        "table",
+        "furniture",
+        "metal"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-bar-chair-round-01",
+      "file": "ph-bar-chair-round-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "bar_chair_round_01",
+        "res": "1k"
+      },
+      "title": "Bar Chair Round 01",
+      "source": "Poly Haven — Dairon Sanchez (CC0)",
+      "source_url": "https://polyhaven.com/a/bar_chair_round_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "bar",
+        "pub",
+        "stool",
+        "tall",
+        "wooden",
+        "classical"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-chinese-armchair",
+      "file": "ph-chinese-armchair.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_armchair",
+        "res": "1k"
+      },
+      "title": "Chinese Armchair",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_armchair",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "vintage",
+        "antique",
+        "ornate",
+        "chinese",
+        "asian",
+        "varnished"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-chinese-cabinet",
+      "file": "ph-chinese-cabinet.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_cabinet",
+        "res": "1k"
+      },
+      "title": "Chinese Cabinet",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_cabinet",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "style": "photoreal",
+      "tags": [
+        "storage",
+        "old",
+        "wooden",
+        "vintage",
+        "antique",
+        "ornate",
+        "traditional"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-chinese-commode",
+      "file": "ph-chinese-commode.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_commode",
+        "res": "1k"
+      },
+      "title": "Chinese Commode",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_commode",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "storage",
+      "style": "photoreal",
+      "tags": [
+        "storage",
+        "vintage",
+        "antique",
+        "wooden",
+        "ornate",
+        "asian",
+        "traditional"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.6,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-chinese-console-table",
+      "file": "ph-chinese-console-table.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_console_table",
+        "res": "1k"
+      },
+      "title": "Chinese Console Table",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_console_table",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "vintage",
+        "antique",
+        "wooden",
+        "ornate",
+        "traditional",
+        "asian"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-chinese-screen-panels",
+      "file": "ph-chinese-screen-panels.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_screen_panels",
+        "res": "1k"
+      },
+      "title": "Chinese Screen Panels",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_screen_panels",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "decor",
+      "style": "photoreal",
+      "tags": [
+        "decor",
+        "vintage",
+        "antique",
+        "old",
+        "wooden",
+        "ornate",
+        "asian"
+      ],
+      "verified": true,
       "clearance_m": null
+    },
+    {
+      "id": "ph-chinese-sofa",
+      "file": "ph-chinese-sofa.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_sofa",
+        "res": "1k"
+      },
+      "title": "Chinese Sofa",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_sofa",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "vintage",
+        "antique",
+        "wooden",
+        "ornate",
+        "traditional",
+        "fancy"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-chinese-stool",
+      "file": "ph-chinese-stool.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_stool",
+        "res": "1k"
+      },
+      "title": "Chinese Stool",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_stool",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "seating",
+      "style": "photoreal",
+      "tags": [
+        "seating",
+        "vintage",
+        "antique",
+        "wooden",
+        "ornate",
+        "traditional",
+        "asian"
+      ],
+      "verified": false,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0,
+        "back": 0
+      }
+    },
+    {
+      "id": "ph-chinese-tea-table",
+      "file": "ph-chinese-tea-table.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "chinese_tea_table",
+        "res": "1k"
+      },
+      "title": "Chinese Tea Table",
+      "source": "Poly Haven — Kirill Sannikov (CC0)",
+      "source_url": "https://polyhaven.com/a/chinese_tea_table",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "vintage",
+        "antique",
+        "old",
+        "wooden",
+        "ornate",
+        "traditional"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
+    },
+    {
+      "id": "ph-coffee-table-round-01",
+      "file": "ph-coffee-table-round-01.glb",
+      "fetch": {
+        "source": "polyhaven",
+        "slug": "coffee_table_round_01",
+        "res": "1k"
+      },
+      "title": "Coffee Table Round 01",
+      "source": "Poly Haven — Ulan Cabanilla (CC0)",
+      "source_url": "https://polyhaven.com/a/coffee_table_round_01",
+      "license": "CC0-1.0",
+      "attribution": null,
+      "sizeAxis": "y",
+      "yawDeg": 0,
+      "anchor": "floor",
+      "category": "table",
+      "style": "photoreal",
+      "tags": [
+        "table",
+        "modern",
+        "marble",
+        "tea",
+        "coffee",
+        "metal",
+        "sleek"
+      ],
+      "verified": true,
+      "clearance_m": {
+        "front": 0.45,
+        "sides": 0.45,
+        "back": 0.45
+      }
     }
   ]
 }
