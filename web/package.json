@@ -10,7 +10,9 @@
     "ingest:selftest": "node scripts/normalize.mjs --self-test",
     "dev": "npm run wasm && vite",
     "build": "npm run wasm && tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -21,6 +23,7 @@
     "@gltf-transform/core": "^4.4.1",
     "@gltf-transform/extensions": "^4.4.1",
     "@gltf-transform/functions": "^4.4.1",
+    "@playwright/test": "^1.62.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/three": "^0.181.0",

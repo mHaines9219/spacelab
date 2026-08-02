@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: cargo test + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      # Warnings fail the build. The tree is clippy-clean today and the cheapest way to
+      # keep it that way is to refuse the first warning rather than the hundredth.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  web:
+    name: tsc + browser smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      # The furniture GLBs are gitignored but their masters in `web/assets-src/` are
+      # committed, so the catalog can be rebuilt here without network access.
+      - run: npm run ingest:build
+        working-directory: web
+
+      # Deliberately NOT `npm run textures`. That fetches ~9 MB of CC0 sets from an
+      # external host, which would make CI both slower and dependent on someone else's
+      # uptime. The app runs untextured and the smoke test ignores the resulting 404s.
+
+      - run: npm run wasm
+        working-directory: web
+
+      - run: npx tsc --noEmit
+        working-directory: web
+
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - run: npx playwright test
+        working-directory: web
+
+      # Traces and failure screenshots are the point of a browser test — keep them so a
+      # red run can be looked at rather than guessed at.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: ignore
+
+  plan:
+    name: PLAN.md log
+    runs-on: ubuntu-latest
+    # Needs a base to diff against, so it only runs on pull requests.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 .github/scripts/check_plan.py "${{ github.event.pull_request.base.sha }}"
