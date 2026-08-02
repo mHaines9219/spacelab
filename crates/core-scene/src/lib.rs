@@ -132,6 +132,22 @@ pub enum FloorMaterial {
     Concrete,
 }
 
+/// The walls' paint finish. Same split as [`FloorMaterial`]: the document owns the
+/// *choice*, the renderer owns what each finish looks like (here, a tint over the one
+/// shared matte plaster set — walls differ by colour, not by texture). Ordinal matches
+/// the index the wasm boundary exchanges with the web layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum WallMaterial {
+    /// The fixed off-white the walls carried before finishes were selectable, so an
+    /// existing room opens looking exactly as it did.
+    #[default]
+    WarmWhite,
+    CoolGrey,
+    Greige,
+    Sage,
+    Clay,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
     pub walls: Vec<Wall>,
@@ -141,6 +157,7 @@ pub struct Scene {
     pub openings: Vec<Opening>,
     pub furnishings: Vec<Furnishing>,
     pub floor_material: FloorMaterial,
+    pub wall_material: WallMaterial,
     /// The room's floor footprint (metres, in loop order). Owned by the document
     /// independently of the walls, so removing a wall never reshapes the floor.
     pub floor_outline: Vec<Vec2>,
@@ -192,6 +209,8 @@ pub enum Command {
     },
     /// Choose the floor's surface finish.
     SetFloorMaterial(FloorMaterial),
+    /// Choose the walls' paint finish.
+    SetWallMaterial(WallMaterial),
     /// Set the floor footprint (metres, loop order). Empty means no floor.
     SetFloorOutline(Vec<Vec2>),
 }
@@ -253,6 +272,7 @@ impl Scene {
                 }
             }
             Command::SetFloorMaterial(material) => self.floor_material = material,
+            Command::SetWallMaterial(material) => self.wall_material = material,
             Command::SetFloorOutline(outline) => self.floor_outline = outline,
         }
     }
@@ -360,6 +380,25 @@ mod tests {
         assert_eq!(scene.floor_material, FloorMaterial::WoodLight);
         scene.apply(Command::SetFloorMaterial(FloorMaterial::Concrete));
         assert_eq!(scene.floor_material, FloorMaterial::Concrete);
+    }
+
+    #[test]
+    fn wall_material_defaults_to_warm_white_and_is_settable() {
+        let mut scene = one_chair();
+        assert_eq!(scene.wall_material, WallMaterial::WarmWhite);
+        scene.apply(Command::SetWallMaterial(WallMaterial::Sage));
+        assert_eq!(scene.wall_material, WallMaterial::Sage);
+    }
+
+    /// The two finishes are independent choices — picking a floor must not disturb the
+    /// walls, and vice versa.
+    #[test]
+    fn floor_and_wall_finishes_are_independent() {
+        let mut scene = one_chair();
+        scene.apply(Command::SetWallMaterial(WallMaterial::Clay));
+        scene.apply(Command::SetFloorMaterial(FloorMaterial::Tile));
+        assert_eq!(scene.wall_material, WallMaterial::Clay);
+        assert_eq!(scene.floor_material, FloorMaterial::Tile);
     }
 
     #[test]

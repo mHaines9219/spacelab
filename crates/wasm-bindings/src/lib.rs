@@ -10,7 +10,7 @@ use core_geometry::{
 };
 use core_scene::{
     Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, Opening, OpeningId,
-    OpeningKind, Placement, Scene, Wall,
+    OpeningKind, Placement, Scene, Wall, WallMaterial,
 };
 use glam::{Vec2, Vec3};
 use wasm_bindgen::prelude::*;
@@ -313,6 +313,27 @@ impl Document {
         self.checkpoint();
         self.scene.apply(Command::SetFloorMaterial(material));
         self.floor_material()
+    }
+
+    // --- Wall finish -------------------------------------------------------
+
+    /// Current wall paint finish as an ordinal matching `WallMaterial`.
+    pub fn wall_material(&self) -> u8 {
+        self.scene.wall_material as u8
+    }
+
+    /// Choose the wall paint finish by ordinal; returns the resulting ordinal.
+    pub fn set_wall_material(&mut self, index: u8) -> u8 {
+        let material = match index {
+            0 => WallMaterial::WarmWhite,
+            1 => WallMaterial::CoolGrey,
+            2 => WallMaterial::Greige,
+            3 => WallMaterial::Sage,
+            _ => WallMaterial::Clay,
+        };
+        self.checkpoint();
+        self.scene.apply(Command::SetWallMaterial(material));
+        self.wall_material()
     }
 
     // --- Furnishing catalog & selection -----------------------------------
@@ -808,6 +829,33 @@ mod tests {
 
         // Nothing left to undo.
         assert!(!doc.undo());
+    }
+
+    /// The wall finish rides the same command funnel as everything else, so undo covers
+    /// it for free — and picking a wall colour must not disturb the floor's.
+    #[test]
+    fn wall_finish_is_selectable_and_undoable_without_touching_the_floor() {
+        let mut doc = Document::new();
+        doc.set_rectangle(4.0, 3.0);
+        assert_eq!(doc.wall_material(), 0);
+
+        doc.set_floor_material(2);
+        assert_eq!(doc.set_wall_material(3), 3);
+        assert_eq!(doc.floor_material(), 2, "wall finish must not move the floor");
+
+        // Undo the wall finish only: walls revert, the floor keeps its choice.
+        assert!(doc.undo());
+        assert_eq!(doc.wall_material(), 0);
+        assert_eq!(doc.floor_material(), 2);
+        assert_eq!(doc.wall_count(), 2, "the room is untouched by a finish change");
+    }
+
+    /// Out-of-range ordinals clamp to the last finish rather than panicking, matching
+    /// `set_floor_material`'s catch-all arm.
+    #[test]
+    fn an_out_of_range_wall_finish_ordinal_clamps() {
+        let mut doc = Document::new();
+        assert_eq!(doc.set_wall_material(99), 4);
     }
 
     #[test]
