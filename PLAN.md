@@ -26,17 +26,104 @@
 
 Updated at the end of every PR — see [Keeping this section current](#keeping-this-section-current). Newest entry first.
 
-**Now: M1 — Floorplan & shell.** MVP is M0–M4.
+**Now: M1 — Floorplan & shell.** MVP is **M0–M3 + M5** — [amended 2026-08-01](#milestones)
+on the owner's ruling; M4 moves after MVP and persistence moves into it.
 
 | Milestone | State |
 |---|---|
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
-| M3 — Look | ⬜ |
-| M4 — Capture companion (iOS) | ⬜ |
-| M5 — Persistence & sharing | ⬜ |
+| M3 — Look | ⬜ (renderer basics landed early, during M1) |
+| M5 — Persistence & sharing | ⬜ **in MVP** |
+| M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
+
+### M1: mitred wall junctions · 2026-08-01
+
+**Accomplished**
+
+- **Wall corners close instead of overlapping.** Every wall extruded as its own rectangle
+  — footprint `start ± normal·½t` to `end ± normal·½t` — so two walls meeting at a corner
+  overlapped in a lump on the inside and left a notch on the outside. New
+  `crates/core-geometry/src/junction.rs` solves each junction as a polyline turning through
+  it: for each thickness side, intersect the two walls' offset lines and slide that ground
+  corner along its own centreline to the crossing. In a 4×3 room the corners now land
+  exactly on the 4.12×3.12 outer and 3.88×2.88 inner rectangles, and **both walls at a
+  corner agree on the same two points** — which is what "no gap, no lump" means. Unequal
+  thicknesses work (the intersection does not assume symmetry) because the solve is on the
+  offset lines, not on a bisector.
+- **The solver emits along-coordinates, not geometry.** `mitre_walls(&scene) -> Vec<WallEnds>`
+  returns where each wall's four corners sit *on its own centreline*; `wall_mesh` consumes
+  that. Faces run corner to corner instead of `0..length`, so the outer face grows past the
+  joint while the inner one pulls back. Openings still live on the centreline and are
+  untouched — quad counts are identical to a square wall, with and without a door.
+- **Three deliberate fallbacks to a square end,** each tested: a **T or cross** (three-plus
+  ends at a point has no single corner to close), a **collinear run** (the solve is singular
+  and square already meets perfectly), and a corner **too shallow to mitre** — past
+  `MITRE_LIMIT` (4 thicknesses of overshoot, about 14°) a true mitre grows a long spike that
+  reads as a rendering defect rather than as a corner.
+- Verified: **61 tests green across the workspace + clippy clean** (8 new solver tests in
+  `junction.rs`, 7 new mesh-level tests in `lib.rs` covering the room envelope, unequal
+  thicknesses, unchanged quad counts, face extents, end-cap winding, and a degenerate stub).
+  WASM **36,289 B gzipped, up 958 B** from `main`'s 35,331 B — measured `gzip -n -9` on
+  `wasm_bindings_bg.wasm` after a fresh `npm run wasm`, against a 250 KB budget. (Earlier
+  revisions of this entry said "35.6 KB, was 35.5", which understated the cost tenfold: it
+  mixed a KB reading of one build with a KiB reading of the other. Quote raw bytes and the
+  exact gzip flags — the `-n` alone is worth ~22 B and `-9` about 50 B, which is enough for
+  two honest measurements to disagree.) Also driven in the real app and compared
+  side by side against `main` at identical camera framing: on `main` the outer corner of the
+  default two-wall room shows a stepped notch where one wall's end cap juts past the other's
+  face; on this branch the two outer faces meet in a single edge. `tsc` clean, no console
+  errors, `__wallCount` 2 and `__wallTris` **24 on both builds** — the corners moved and no
+  geometry was added.
+
+**Remains**
+
+- **Only the 90° corner has been looked at.** The before/after comparison above covers the
+  default two-wall room, whose one junction is a right angle. A **traced acute-angle room**
+  and a **closed four-corner room** are covered by Rust assertions but have not been seen on
+  screen, and the shallow-angle fallback below is exactly where a screenshot would earn its
+  keep. Playwright is still driven ad hoc — there is no suite committed in the repo, so this
+  comparison is not something CI will repeat.
+- **T-junctions stay square.** An interior partition meeting a wall shows a small square butt
+  end buried in it. Correct-ish and invisible from most angles, but a proper T wants the stem
+  trimmed to the through-wall's face, which is a different solve from the two-end mitre.
+- **Corners shallower than ~14° keep the old overlap**, by design — `MITRE_LIMIT` trades a
+  wrong-looking spike for a wrong-looking lump. A bevel (cutting the spike off flat) is the
+  usual third option and is not implemented.
+- **A wall shorter than its own mitres degenerates.** Under about 2× thickness between two
+  corners, the inner face inverts and drops out and the caps become bow-ties. Tested only to
+  the extent that it emits finite geometry and does not panic — a user mid-drag can pass
+  through this shape, and it will look wrong while they do.
+- **An opening touching a mitred end can overhang it.** Cut spans clamp to `[0, length]`
+  while the face now starts at the mitred corner, so an opening reaching the very end of a
+  wall can overhang the retracted inner face by up to half a thickness. `seat_opening` keeps
+  openings clear of the ends in practice, so this is reachable only by a caller that bypasses
+  it.
+- **Each mitred joint emits two coincident end caps** — both walls cap themselves in the same
+  mitre plane, facing opposite ways. Depth-correct (each faces into the other's solid, so it
+  is occluded rather than z-fighting), but it is two dead quads per corner. Dropping them
+  needs `wall_mesh` to know which of its ends were mitred, which `WallEnds` does not say.
+- **Room detection from the wall graph is still open** — the other half of M1, and the thing
+  multi-room and branching layouts need. Next in this lane, then the `set_rectangle` rebuild
+  that wipes hand-added walls, then the staggered drop point (0.3 m a step against a 1.964 m
+  couch, so every successive placement and every bullpen re-import lands overlapping — a
+  pre-existing placement bug that clearance warnings merely made visible). Ordering note:
+  `RESEARCH/ROOMPLAN_SCHEMA_FIT.md` finds that RoomPlan ships **no floor polygon**, so a
+  future importer has to derive `floor_outline` by walking the wall loop — the same loop walk
+  room detection is. **The importer is downstream of this item, not parallel to it**, or the
+  walk gets written twice.
+- Carried: a rotated item dragged against a wall keeps the user's yaw rather than re-facing
+  flush, so the offset is computed from its back face; clearance/collision between furnishings
+  is still the headline M2 gap (being taken up now as hand-rolled 2D SAT on oriented
+  rectangles rather than `parry3d`, which this plan names but which was never added to the
+  tree — that deviation is argued in its own PR, not here); `front=+Z` unverified; thumbnails render client-side and are not cached to disk; KTX2
+  unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan USD round-trip (schema half in
+  progress, hardware half blocked); fps measured on one machine; dev-only probes
+  (`__furnishingCount`, `__wallCount`, `__floorTris`, `__selectedYaw`, `__openingCount`,
+  `__wallTris`, `__addOpeningOnWall`, `__deleteWallById`) — note `__wallTris` is unchanged by
+  this PR, since mitring moves corners without adding quads.
 
 ### Fix: a grab no longer wipes a furnishing's rotation · 2026-07-25
 
@@ -419,7 +506,21 @@ Throwaway code proving the whole seam: Rust→WASM emits wall geometry for two h
 
 **M6+ — Expansion.** Android capture (ARCore + corner-tap), native desktop shell (`wgpu`), cloud final-render, AI assist, collaboration, brand catalog.
 
-**MVP = M0–M4.** M5 is close behind and arguably part of it, since a design nobody can share is a design nobody talks about.
+**MVP = M0–M3 + M5.** Amended 2026-08-01 (was M0–M4) on the project owner's ruling —
+verbatim, 2026-08-02T00:31:55Z: *"yes skip to M5, lidar, and apple account are not set up,
+but saving and loading are MVP."* **M4 moves after MVP and save/load is in it.** Two
+reasons stand behind the call. First,
+**nothing persists** — there is no serialization anywhere in the tree, so a reload eats the
+room, the walls and the bullpen, which makes the [Verification](#verification) thesis test
+(hand the build to someone who has never used Blender and watch them lay out their bedroom)
+much weaker than it should be. Second, **M4 is hardware-blocked** without a device or an
+account, and account provisioning has lead time the [risk table](#risks) says to start
+during M3 regardless.
+
+The RoomPlan *schema* round-trip is not hardware-blocked and does not move: a synthetic
+export against Apple's published `CapturedRoom` shape answers the structural question
+without a device. It leaves the MVP path but stays owed — see
+[Verification](#verification).
 
 ## Deliberately deferred
 

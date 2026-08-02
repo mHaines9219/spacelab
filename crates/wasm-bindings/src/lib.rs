@@ -5,7 +5,9 @@
 //! Room construction lives here, not in JS, per the "no document/geometry logic in
 //! JavaScript" rule.
 
-use core_geometry::{MeshBuffers, floor_mesh, resolve_placement, seat_opening, wall_mesh};
+use core_geometry::{
+    MeshBuffers, floor_mesh, mitre_walls, resolve_placement, seat_opening, wall_mesh,
+};
 use core_scene::{
     Anchor, Asset, Command, FloorMaterial, Furnishing, FurnishingId, Opening, OpeningId,
     OpeningKind, Placement, Scene, Wall,
@@ -184,9 +186,11 @@ impl Document {
         self.floor = MeshBuffers::default();
         floor_mesh(&self.scene, &mut self.floor);
         self.walls = MeshBuffers::default();
-        for wall in &self.scene.walls {
+        // Mitres are a property of the whole wall graph, so they are solved once per
+        // rebuild rather than per wall.
+        for (wall, ends) in self.scene.walls.iter().zip(mitre_walls(&self.scene)) {
             let openings: Vec<Opening> = self.scene.openings_on(wall.id).copied().collect();
-            wall_mesh(wall, &openings, &mut self.walls);
+            wall_mesh(wall, &openings, ends, &mut self.walls);
         }
     }
 
