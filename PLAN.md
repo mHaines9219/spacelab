@@ -33,10 +33,60 @@ Updated at the end of every PR — see [Keeping this section current](#keeping-t
 | M0 — Vertical spike | ✅ [#1](https://github.com/mHaines9219/spacelab/pull/1) |
 | M1 — Floorplan & shell | 🚧 [#2](https://github.com/mHaines9219/spacelab/pull/2) |
 | M2 — Furnishing | 🚧 [#3](https://github.com/mHaines9219/spacelab/pull/3) |
-| M3 — Look | ⬜ |
+| M3 — Look | 🚧 |
 | M4 — Capture companion (iOS) | ⬜ |
 | M5 — Persistence & sharing | ⬜ |
 | M6+ — Expansion | ⬜ |
+
+### M3: wall finishes as document state · 2026-08-01
+
+**Accomplished**
+
+- **Walls take a selectable paint finish, and the document owns the choice.** New
+  `WallMaterial` enum (`WarmWhite`, `CoolGrey`, `Greige`, `Sage`, `Clay`) + a
+  `SetWallMaterial` command on the `Scene`, mirroring `FloorMaterial` exactly — so
+  **Rule #1 holds**: Rust owns *which* finish is picked, JS owns what it looks like.
+  Because it flows through the same `apply` funnel, **undo covers it for free**. New
+  binding methods `wall_material` / `set_wall_material`; the picker in the bottom-left
+  box grew a second row, and the floor row is unchanged.
+- **The walls share one material and swap only its tint.** This diverges from the
+  floor's array-of-materials on purpose: every wall finish is the same CC0 matte
+  plaster set (`PaintedPlaster017`) at a different colour, so building five materials
+  would fetch the same three textures five times. Keeping the plaster maps is also what
+  stops the finishes reading as flat paint — the normal map still does the work.
+  Index 0 is the exact off-white the walls carried before, so **an existing room opens
+  looking identical**.
+- Verified: **50 Rust tests + clippy clean** (scene-level default/set and
+  floor-and-wall-independence; binding-level undo-reverts-walls-without-moving-the-floor
+  and out-of-range-ordinal-clamps). `tsc` clean. Drove the real app in Chromium:
+  create room → all five finishes → floor swap → undo, **16/16 checks, no console
+  errors**; screenshots reviewed at each finish (plaster texture survives the tint;
+  Sage and Clay both sit right against light wood).
+
+**Remains**
+
+- **Scene-wide, not per-wall.** One finish for every wall in the room — you cannot paint
+  an accent wall. Per-wall material means splitting `shell_mesh`'s single `MeshBuffers`
+  into one buffer set per material, which is the same function mitred junctions rewrites;
+  deliberately sequenced after that lands.
+- **Five curated colours, no colour picker**, and no per-wall/per-room texture choice —
+  only tint varies, so wallpaper, panelling, and tile walls are all still absent.
+- The M1-era note that wall options were omitted "by request" is now partly overtaken:
+  this is the M3 material-swapping pass its own **Remains** entry asked for. Flagged
+  rather than absorbed — if the intent was that walls should stay fixed, this is the
+  change to revert.
+- **The repo is not `rustfmt`-clean and there is no CI.** `cargo fmt --check` reports
+  diffs across all three crates, nearly all pre-existing; new lines here match the
+  surrounding house style rather than reformatting files other lanes are editing.
+- **Lighting presets and camera framing — the other two M3 items — are untouched.**
+  The renderer basics (ACES tone mapping, PMREM/`RoomEnvironment` IBL, PCF soft shadows,
+  a tuned sun) have been in place since the floor-finishes PR; what is missing is
+  document-level *choice* over them, the same shape as this change.
+- Carried: clearance/collision still the headline M2 gap; resize still rebuilds a
+  rectangle as two walls, wiping hand-added walls; `front=+Z` unverified; thumbnails
+  uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan USD
+  round-trip; stashed items and everything else still unpersisted (M5); fps on one
+  machine; dev-only probes.
 
 ### Fix: a grab no longer wipes a furnishing's rotation · 2026-07-25
 
