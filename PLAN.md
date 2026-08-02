@@ -89,10 +89,11 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
   footprint on geometry change. Worth noting the two are coupled: the key light is placed
   relative to where the camera *starts*, so once the user orbits, the flattering angle is
   no longer guaranteed. Nothing re-keys the light to the current view.
-- **Deleting a wall used to leave its doors and windows floating in mid-air.** Fixed here
-  in passing (`deleteSelectedWall` and the `deleteWall` probe both re-run
-  `rebuildOpenings`) since it lives in the same file — the document already cascaded the
-  openings away, only the renderer had not heard. Found by the browser suite.
+- The floating-door bug (a deleted wall leaving its openings behind) is **not** fixed
+  here. It was fixed twice simultaneously; the structural version — pairing
+  `rebuildOpenings` into `syncRoomGeometry` itself so a new call site cannot reintroduce
+  it — went in separately, and this branch's narrower two-call-site version was dropped
+  rather than merged alongside it.
 - The verification screenshots were reviewed by eye; nothing pins the moods against
   reference images, so a preset could drift without a test noticing.
 - Carried: per-wall material still waits on a `shell_mesh` split; walkway clearance,

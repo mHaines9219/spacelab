@@ -750,10 +750,6 @@ export async function createViewport(
     doc.delete_wall(selectedWall);
     syncRoomGeometry();
     rebuildWallPicks();
-    // The document cascades a wall's openings away with it, so the meshes for those
-    // openings have to go too — without this their pick box, outline and glass pane
-    // stay floating where the wall used to be.
-    rebuildOpenings();
     selectWall(null);
   };
 
@@ -1085,7 +1081,6 @@ export async function createViewport(
     deleteWall: (id) => {
       doc.delete_wall(id);
       syncRoomGeometry();
-      rebuildOpenings();
     },
     wallSegments: () => Array.from(doc.wall_segments()),
     wallIds: () => Array.from(doc.wall_ids()),
