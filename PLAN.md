@@ -39,6 +39,66 @@ on the owner's ruling; M4 moves after MVP and persistence moves into it.
 | M4 — Capture companion (iOS) | ⬜ after MVP — no LiDAR device, no Apple account |
 | M6+ — Expansion | ⬜ |
 
+### Fix: a deleted wall no longer leaves its door hanging in mid-air (re-landed) · 2026-08-02
+
+**Accomplished**
+
+- **Deleting a wall now takes its openings off screen with it.** The document was always
+  right — `Command::DeleteWall` cascades a wall's openings away and a Rust test has guarded
+  that since the doors-and-windows PR. The renderer never got the message:
+  `deleteSelectedWall` re-uploaded the wall mesh and rebuilt the wall pick boxes but **not**
+  the opening proxies, so the door's pick box and selection outline stayed in the scene,
+  floating where the wall had been. Found by Bumble on the browser suite's first full run —
+  Rust green throughout, and the app still drew a floating door.
+- **Fixed by pairing the two rather than adding a third call.** An opening is a hole in a
+  wall, so any edit that re-uploads the wall mesh has to re-derive the openings —
+  `rebuildOpenings` now runs inside `syncRoomGeometry`, the one place every wall edit
+  already goes through, so a new call site cannot reintroduce it. That closed **three**
+  sites: the keyboard delete path, the `handle.deleteWall` API (also missing
+  `rebuildWallPicks`, so a deleted wall's pick box stayed clickable), and the
+  `__deleteWallById` probe, which reproduced the omission rather than exposing it. Six
+  now-redundant `rebuildOpenings()` calls came back out, one of them on the opening-drag
+  path where it was rebuilding every proxy twice per pointer move.
+- **A selection can no longer outlive its opening.** `rebuildOpenings` drops
+  `selectedOpening` when the document no longer has it, so deleting a wall under a
+  *selected* door closes the door panel instead of leaving its width and height editable.
+- **Bumble's `test.fail(` tripwire is retired in the same commit,** so it cannot fire red
+  on whoever merges next, and `undo restores a wall it deleted` now asserts the opening
+  count as well — that assertion was deliberately omitted while the leak existed, because
+  it read 1 the whole way through and proved nothing.
+- **Why this says "re-landed".** This shipped once already, as #18, and **never reached
+  `main`.** #18 was stacked on `ci-browser-suite` (#17) so the merge order would be forced;
+  #17 was then merged to `main` from a commit before #18 landed on it, so #18's merge went
+  into a branch `main` had already consumed. `git merge-base --is-ancestor 4623529
+  origin/main` is false. Honey had independently fixed the same bug in #16 and dropped that
+  version by agreement so the two would not collide — so a correct agreement plus a stacked
+  merge left **zero** copies of the fix on `main`. Nothing raised an alarm: the pinned
+  `test.fail(` travelled with the lost fix, so the suite stayed correctly green over a live
+  bug.
+
+**Remains**
+
+- **Nothing detects a merged PR that did not reach `main`.** The `PLAN.md` guard catches the
+  log half of this class; the code half is unguarded. A CI step asserting each recently
+  merged PR's head is an ancestor of `main` would have caught this in seconds — one
+  `git merge-base --is-ancestor` per PR.
+- **No stacked PRs.** The lesson is cheap to state and was expensive to learn: stacking let
+  a merge consume its own base. Not repeating it.
+- **`__deleteWallById` still hand-mirrors `deleteSelectedWall`** rather than calling it, so
+  the two can drift apart again.
+- **`rebuildOpenings` inside `syncRoomGeometry` is unconditional** — every wall edit disposes
+  and recreates every opening proxy, and it is now the *only* path, so removing the pairing
+  breaks opening rendering outright rather than degrading. Unmeasurable at this count, but
+  it makes the coarse rebuild load-bearing where the doors-and-windows entry had already
+  flagged wanting a targeted re-emit.
+- Carried: resize still wipes hand-added walls and their openings on `main` (fixed in the
+  resize PR, not here); the staggered 0.3 m drop point overlaps a 1.96 m couch on every
+  placement; per-wall material still waits on a `shell_mesh` split; walkway clearance,
+  door-swing arcs and furniture-vs-wall still open in M2; `front=+Z` unverified; thumbnails
+  uncached; KTX2 unbuilt; no redo; rotate/scale undo per-keypress; RoomPlan real-scan
+  validation owed; nothing persists yet (M5); fps on one machine; `cargo fmt` reports diffs
+  across the three crates, owed as its own commit now the branches holding them have merged.
+
 ### M3: lighting presets as document state · 2026-08-01
 
 **Accomplished**
