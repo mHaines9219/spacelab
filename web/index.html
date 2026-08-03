@@ -747,6 +747,99 @@
         color: #9a978f;
       }
 
+      /* Controls legend — key/mouse bindings, middle-left. Shares that edge with the
+         selection panel (z-index 5); the legend sits under it so a selected piece's
+         panel wins, and the legend can be collapsed out of the way. */
+      .legend {
+        position: fixed;
+        top: 50%;
+        left: 16px;
+        transform: translateY(-50%);
+        z-index: 4;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 168px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        background: #000000c4;
+        color: #e8e6e1;
+        font: 12px ui-monospace, monospace;
+      }
+      .legend-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .legend-head strong {
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #9a978f;
+      }
+      .legend-hide {
+        padding: 0 4px;
+        border: none;
+        background: transparent;
+        color: #9a978f;
+        font: inherit;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .legend-hide:hover {
+        color: #e8e6e1;
+      }
+      .legend-group {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .legend-group-name {
+        margin-bottom: 2px;
+        color: #7f7c74;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .legend-row kbd {
+        flex: none;
+        min-width: 44px;
+        padding: 2px 5px;
+        border: 1px solid #3a3d44;
+        border-radius: 4px;
+        background: #1c1f25;
+        color: #c9c6bf;
+        font: 11px ui-monospace, monospace;
+        text-align: center;
+      }
+      .legend-row span {
+        color: #9a978f;
+      }
+      /* Collapsed state — a single round toggle in the same spot. */
+      .legend-toggle {
+        position: fixed;
+        top: 50%;
+        left: 16px;
+        transform: translateY(-50%);
+        z-index: 4;
+        width: 32px;
+        height: 32px;
+        border: 1px solid #3a3d44;
+        border-radius: 50%;
+        background: #000000c4;
+        color: #c9c6bf;
+        font: 14px ui-monospace, monospace;
+        cursor: pointer;
+      }
+      .legend-toggle:hover {
+        border-color: #5b9dff;
+        color: #ffffff;
+      }
+
       /* === Accounts: landing + dashboard =============================== */
       .auth-screen,
       .dash {
