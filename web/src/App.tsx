@@ -627,6 +627,8 @@ export function App() {
               setLighting(i);
             }}
           />
+
+          <KeyLegend />
         </>
       )}
     </>
@@ -1033,6 +1035,117 @@ function SwatchRow({
         ))}
       </div>
     </>
+  );
+}
+
+// Whether to spell the undo chord as ⌘Z (Apple) or Ctrl+Z. The key handler already
+// treats metaKey and ctrlKey alike (App's undo, viewport's onKey); this only picks the
+// label that matches the machine so the legend isn't lying to half its users.
+const IS_APPLE =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
+const LEGEND_COLLAPSED_KEY = "spacelab.legend.collapsed";
+
+// The scene's controls, grouped the way a user reaches for them: move the camera, adjust
+// the selected piece, edit. Each entry is [keys, what it does]. The source of truth for
+// these bindings is the keydown handlers in App.tsx and viewport.ts plus OrbitControls'
+// defaults — keep this in step with them.
+const LEGEND: { group: string; rows: [string, string][] }[] = [
+  {
+    group: "camera",
+    rows: [
+      ["drag", "orbit"],
+      ["right-drag", "pan"],
+      ["scroll", "zoom"],
+      ["F", "frame room"],
+    ],
+  },
+  {
+    group: "selected piece",
+    rows: [
+      ["click", "select"],
+      ["drag", "move"],
+      ["← →", "rotate"],
+      ["↑ ↓", "resize"],
+      ["R", "reset size"],
+      ["Del", "remove"],
+    ],
+  },
+  {
+    group: "editing",
+    rows: [
+      [IS_APPLE ? "⌘Z" : "Ctrl+Z", "undo"],
+      ["Esc", "cancel / deselect"],
+    ],
+  },
+];
+
+/**
+ * A middle-left legend of the key and mouse bindings, so the shortcuts scattered across
+ * the panels are discoverable in one place. Starts open for a first-time visitor; collapsing
+ * it is remembered, because someone who knows the controls shouldn't have to dismiss the
+ * same box on every load. A read that throws (private-mode storage) just leaves it open.
+ */
+function KeyLegend() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(LEGEND_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggle = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(LEGEND_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // A legend that won't remember its state is a smaller problem than a crash.
+      }
+      return next;
+    });
+  };
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        className="legend-toggle"
+        onClick={toggle}
+        aria-label="Show controls"
+        title="Show controls"
+      >
+        ?
+      </button>
+    );
+  }
+
+  return (
+    <div className="legend">
+      <div className="legend-head">
+        <strong>controls</strong>
+        <button
+          type="button"
+          className="reset legend-hide"
+          onClick={toggle}
+          aria-label="Hide controls"
+        >
+          ✕
+        </button>
+      </div>
+      {LEGEND.map(({ group, rows }) => (
+        <div key={group} className="legend-group">
+          <span className="legend-group-name">{group}</span>
+          {rows.map(([keys, action]) => (
+            <div key={keys} className="legend-row">
+              <kbd>{keys}</kbd>
+              <span>{action}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 

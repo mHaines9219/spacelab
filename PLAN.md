@@ -48,6 +48,44 @@ yet satisfied, and the rows say so rather than rounding up.
 | M6+ — Expansion | ⬜ |
 | M7 — Accounts & cloud portfolio | 🚧 foundation — Google sign-in, RLS schema, landing + dashboard landed; provider config + deep editor sync remain |
 
+### A controls legend, so the shortcuts stop being folklore · 2026-08-02
+
+**Accomplished**
+
+- **Every key and mouse binding now lives in one on-screen box.** The editor grew its
+  shortcuts one panel at a time — `F` frames, arrows rotate/resize a selection, `R` resets,
+  `Del` removes, `⌘/Ctrl+Z` undoes, `Esc` cancels — and the only place they were written
+  down was per-panel `hint` text a user sees only after already selecting something. A new
+  `KeyLegend` component (`web/src/App.tsx`) collects them all, grouped as *camera* /
+  *selected piece* / *editing*, so orbit/pan/zoom and the keyboard steps are discoverable
+  before the first click. The legend is a **presentation of existing bindings only** — it
+  binds no new keys and is the single readable list; the handlers in `App.tsx` and
+  `viewport.ts` stay the source of truth.
+- **Discoverable without becoming clutter.** It starts open for a first-time visitor and
+  collapses to a small `?` toggle; the collapsed choice is remembered in `localStorage`
+  (`spacelab.legend.collapsed`), matching the app's persistence habit, and a storage read
+  that throws just leaves it open. The undo chord is spelled `⌘Z` on Apple and `Ctrl+Z`
+  elsewhere, mirroring the handler that already treats both modifiers alike.
+- **Placed middle-left, deliberately behind the selection panel.** It shares that edge with
+  the selection/opening panels but sits a z-index below them, so a selected piece's panel
+  wins and the legend tucks under — verified the `furnishing`/`openings`/`clearance` specs
+  (all of which drive those panels) still pass, so the legend intercepts nothing.
+- Verified: `tsc` clean after `npm run wasm`; a throwaway Playwright spec confirmed
+  open → collapse → reload-persists → re-open, then was removed; 13 panel-driving browser
+  specs pass.
+
+**Remains**
+
+- **The legend is hand-maintained against the handlers.** Nothing enforces that it stays in
+  step with the keydown code in `App.tsx`/`viewport.ts` or OrbitControls' defaults — a new
+  binding that forgets to update the `LEGEND` array is invisible to users, and no test
+  guards that coupling.
+- Carried forward from the M7 entry, untouched by this PR: Google OAuth still needs its
+  one manual provider step before a live sign-in; cloud save is still manual/one-shot while
+  autosave stays localStorage; no thumbnails or share links; `persistence.test.ts` still
+  fails locally on this machine's jsdom-30 storage quirk (green on CI); the web side still
+  has no formatter; M2 owes walkway clearance and furniture-vs-wall.
+
 ### M7: accounts, Google sign-in, and a cloud portfolio — the foundation · 2026-08-02
 
 **Accomplished**
